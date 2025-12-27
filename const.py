@@ -1,0 +1,2 @@
+DOMAIN = "pca301"
+DEFAULT_DEVICE = "/dev/ttyUSB0"
