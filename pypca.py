@@ -17,7 +17,7 @@ class PCA:
     _thread = None
     _re_reading = re.compile(r"OK 24 (\d+) 4 (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)")
     _re_devices = re.compile(r"L 24 (\d+) (\d+) : (\d+) 4 (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)")
-    DEVICES_FILE = "/config/.pca_devices.json"
+    DEVICES_FILE = None  # Wird dynamisch gesetzt
 
     def __init__(self, port, timeout=2):
         self._devices = {}
@@ -25,9 +25,11 @@ class PCA:
         self._baud = 57600
         self._timeout = timeout
         self._serial = serial.Serial(timeout=timeout)
-        self._known_devices = []
+        self._known_devices = {}  # deviceId: channel
 
     async def async_load_known_devices(self, hass):
+        # Setze DEVICES_FILE auf das HA-Config-Verzeichnis
+        self.DEVICES_FILE = hass.config.path(".pca_devices.json")
         def _load_known_devices():
             try:
                 _LOGGER.info(f"Trying to read PCA devices file at: {self.DEVICES_FILE}")
@@ -37,7 +39,7 @@ class PCA:
                 return data
             except Exception as e:
                 _LOGGER.warning(f"Could not read PCA devices file at: {self.DEVICES_FILE}: {e}")
-                return []
+                return {}
         def _write_known_devices():
             try:
                 _LOGGER.info(f"Writing PCA devices file at: {self.DEVICES_FILE}")
@@ -83,26 +85,30 @@ class PCA:
         found = False
         DISCOVERY_TIME = 5 if fast else 15
         DISCOVERY_TIMEOUT = 5 if fast else 30
-        for device in self._known_devices:
+        for device, channel in self._known_devices.items():
             self._devices[device] = {}
             self._devices[device]['state'] = 0
             self._devices[device]['consumption'] = 0
             self._devices[device]['power'] = 0
+            self._devices[device]['channel'] = channel
         while not (int(time()) - start > DISCOVERY_TIMEOUT) or not (int(time()) - start > DISCOVERY_TIME or found):
             line = self._serial.readline().decode("utf-8")
+            _LOGGER.debug(f"Received line: {line.strip()}")
             if len(line) > 1:
                 line = line.split(" ")
                 if line[8] != '170' or line[9] != '170':
                     deviceId = str(line[4]).zfill(3) + str(line[5]).zfill(3) + str(line[6]).zfill(3)
+                    channel = line[2]  # Channel ist an Position 2 laut PCA301 Protokoll
                     self._devices[deviceId] = {}
                     self._devices[deviceId]["power"] = (int(line[8]) * 256 + int(line[9])) / 10.0
                     self._devices[deviceId]["state"] = int(line[7])
                     self._devices[deviceId]["consumption"] = (int(line[10]) * 256 + int(line[11])) / 100.0
+                    self._devices[deviceId]["channel"] = channel
                     if deviceId in self._known_devices:
                         _LOGGER.info(f"Skip device with ID {deviceId}, because it's already known.")
                     else:
-                        _LOGGER.info(f"New device found: {deviceId}, will wait for another device for {DISCOVERY_TIME} seconds...")
-                        self._known_devices.append(deviceId)
+                        _LOGGER.info(f"New device found: {deviceId} (channel {channel}), will wait for another device for {DISCOVERY_TIME} seconds...")
+                        self._known_devices[deviceId] = channel
                         found = True
                         start = time()
         try:
@@ -154,28 +160,29 @@ class PCA:
         self._thread.daemon = True
         self._thread.start()
 
-    def turn_off(self, deviceId, channel='05'):
-        # deviceId ist jetzt 6-stelliges Hex, channel 2-stelliges Hex
+    def turn_off(self, deviceId):
         # deviceId ist ein 9-stelliger String, z.B. '009088163'
+        channel = self._known_devices.get(deviceId, '01')
         addr1 = int(deviceId[0:3])
         addr2 = int(deviceId[3:6])
         addr3 = int(deviceId[6:9])
-        chan = int(channel, 16)
+        chan = int(channel, 16) if isinstance(channel, str) else int(channel)
         cmd = [chan, 5, addr1, addr2, addr3, 0, 255, 255, 255, 255]
-        _LOGGER.info(f"Turning OFF PCA301 device {deviceId} (hex) channel {channel} with command: {cmd}")
+        _LOGGER.info(f"Turning OFF PCA301 device {deviceId} channel {channel} with command: {cmd}")
         self._write_cmd(cmd)
         self._devices[deviceId]["state"] = 0
         _LOGGER.info(f"PCA301 device {deviceId} state set to OFF")
         return True
 
-    def turn_on(self, deviceId, channel='05'):
+    def turn_on(self, deviceId):
         # deviceId ist ein 9-stelliger String, z.B. '009088163'
+        channel = self._known_devices.get(deviceId, '01')
         addr1 = int(deviceId[0:3])
         addr2 = int(deviceId[3:6])
         addr3 = int(deviceId[6:9])
-        chan = int(channel, 16)
+        chan = int(channel, 16) if isinstance(channel, str) else int(channel)
         cmd = [chan, 5, addr1, addr2, addr3, 1, 255, 255, 255, 255]
-        _LOGGER.info(f"Turning ON PCA301 device {deviceId} (hex) channel {channel} with command: {cmd}")
+        _LOGGER.info(f"Turning ON PCA301 device {deviceId} channel {channel} with command: {cmd}")
         self._write_cmd(cmd)
         self._devices[deviceId]["state"] = 1
         _LOGGER.info(f"PCA301 device {deviceId} state set to ON")

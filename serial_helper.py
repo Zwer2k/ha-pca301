@@ -1,5 +1,5 @@
-import glob
+from pathlib import Path
 
 def list_serial_ports():
     """List available serial ports on Linux (sync)."""
-    return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+    return [str(p) for p in Path("/dev").glob("ttyUSB*")] + [str(p) for p in Path("/dev").glob("ttyACM*")]
