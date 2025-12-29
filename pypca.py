@@ -5,6 +5,7 @@ import serial
 import re
 import threading
 import json
+import time
 
 SEND_SUFFIX = "s"
 
@@ -241,3 +242,23 @@ class PCA:
                 break
             except Exception as e:
                 _LOGGER.error(f"Unexpected exception in refresh thread: {e}")
+
+    def status_request(self, deviceId, timeout=2):
+        """Send a status request command to the device and wait for a fresh response."""
+        channel = self._known_devices.get(deviceId, "01")
+        addr1 = int(deviceId[0:3])
+        addr2 = int(deviceId[3:6])
+        addr3 = int(deviceId[6:9])
+        chan = int(channel, 16) if isinstance(channel, str) else int(channel)
+        # Command: [channel, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
+        cmd = [chan, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
+        self._write_cmd(cmd)
+        # Wait for a new value in self._devices[deviceId]["state"]
+        start = time.time()
+        last_state = self._devices.get(deviceId, {}).get("state")
+        while time.time() - start < timeout:
+            new_state = self._devices.get(deviceId, {}).get("state")
+            if new_state != last_state:
+                return True
+            time.sleep(0.05)
+        return False
