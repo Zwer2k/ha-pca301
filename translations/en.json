@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up PCA301",
+        "description": "Please select the serial port your PCA301 is connected to"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PCA301 options",
+        "menu_options": {
+            "scan_for_new_devices": "Scan for new devices"
+        }
+      },
+      "scan_for_new_devices": {
+        "title": "Search for new PCA301 devices",
+        "found_devices": "Found devices:",
+        "no_devices": "No devices found."
+      }
+    }
+  }
+}

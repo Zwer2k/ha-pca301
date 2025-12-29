@@ -63,6 +63,7 @@ class PCA:
         self._serial.flushOutput()
         self.get_ready()
         _LOGGER.info(f"Serial port {self._port} opened and ready.")
+        self._start_worker()
 
     def close(self):
         _LOGGER.info(f"Closing serial port {self._port}")
@@ -78,13 +79,52 @@ class PCA:
             line = self._serial.readline().decode("utf-8")
         return True
 
-    def get_devices(self, fast=0):
+    def get_devices(self):
+        """Gibt die aktuelle Geräteliste zurück (ohne Scan)."""
+        # Wenn _devices leer ist, aus _known_devices bauen
+        if not self._devices and self._known_devices:
+            for device, channel in self._known_devices.items():
+                self._devices[device] = {
+                    "state": 0,
+                    "consumption": 0,
+                    "power": 0,
+                    "channel": channel,
+                }
+        return self._devices
+
+    def get_current_power(self, deviceId):
+        return self._devices[deviceId]["power"]
+
+    def get_total_consumption(self, deviceId):
+        return self._devices[deviceId]["consumption"]
+
+    def get_state(self, deviceId):
+        return self._devices[deviceId]["state"]
+
+    def _stop_worker(self):
+        if self._stopevent is not None:
+            self._stopevent.set()
+        if self._thread is not None:
+            self._thread.join()
+
+    def start_scan(self, fast=0):
+        """Starte das Scannen nach neuen Geräten (Discovery)."""
         _LOGGER.info("Please press the button on your PCA")
+        self._stop_worker()
+
+        # Ensure serial port is open
+        if not self._serial.is_open:
+            try:
+                self.open()
+            except Exception as e:
+                _LOGGER.error(f"Could not open serial port {self._port}: {e}")
+                return
         line = []
         start = int(time())
         found = False
         DISCOVERY_TIME = 5 if fast else 15
         DISCOVERY_TIMEOUT = 5 if fast else 30
+        # Vorhandene Geräte initialisieren
         for device, channel in self._known_devices.items():
             self._devices[device] = {}
             self._devices[device]['state'] = 0
@@ -119,25 +159,6 @@ class PCA:
         except Exception as e:
             _LOGGER.error(f"Could not write PCA devices file at: {self.DEVICES_FILE}: {e}")
         _LOGGER.info(f"Devices found: {list(self._devices.keys())}")
-        return self._devices
-
-    def get_current_power(self, deviceId):
-        return self._devices[deviceId]["power"]
-
-    def get_total_consumption(self, deviceId):
-        return self._devices[deviceId]["consumption"]
-
-    def get_state(self, deviceId):
-        return self._devices[deviceId]["state"]
-
-    def _stop_worker(self):
-        if self._stopevent is not None:
-            self._stopevent.set()
-        if self._thread is not None:
-            self._thread.join()
-
-    def start_scan(self):
-        self.get_devices(1)
         self._start_worker()
 
     def _write_cmd(self, cmd):
@@ -190,18 +211,33 @@ class PCA:
 
     def _refresh(self):
         while not self._stopevent.isSet():
-            line = self._serial.readline()
+            if not self._serial or not self._serial.is_open:
+                _LOGGER.warning("Serial port closed, refresh thread exiting.")
+                break
             try:
-                line = line.encode().decode("utf-8")
-            except AttributeError:
-                line = line.decode("utf-8")
-            if self._re_reading.match(line):
-                line = line.split(" ")
-                deviceId = (
-                    str(line[4]).zfill(3)
-                    + str(line[5]).zfill(3)
-                    + str(line[6]).zfill(3)
+                line = self._serial.readline()
+                try:
+                    line = line.encode().decode("utf-8")
+                except AttributeError:
+                    line = line.decode("utf-8")
+                if self._re_reading.match(line):
+                    line = line.split(" ")
+                    deviceId = (
+                        str(line[4]).zfill(3)
+                        + str(line[5]).zfill(3)
+                        + str(line[6]).zfill(3)
+                    )
+                    self._devices[deviceId]["power"] = (
+                        int(line[8]) * 256 + int(line[9])
+                    ) / 10.0
+                    self._devices[deviceId]["state"] = int(line[7])
+                    self._devices[deviceId]["consumption"] = (
+                        int(line[10]) * 256 + int(line[11])
+                    ) / 100.0
+            except serial.SerialException as e:
+                _LOGGER.warning(
+                    f"Serial exception in refresh thread: {e}, exiting thread."
                 )
-                self._devices[deviceId]["power"] = (int(line[8]) * 256 + int(line[9])) / 10.0
-                self._devices[deviceId]["state"] = int(line[7])
-                self._devices[deviceId]["consumption"] = (int(line[10]) * 256 + int(line[11])) / 100.0
+                break
+            except Exception as e:
+                _LOGGER.error(f"Unexpected exception in refresh thread: {e}")

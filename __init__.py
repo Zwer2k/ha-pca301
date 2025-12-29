@@ -1,43 +1,37 @@
+
 """The PCA301 integration."""
+import logging
 
-import voluptuous as vol
-
-from homeassistant.const import CONF_DEVICE, Platform
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, discovery
-from homeassistant.helpers.typing import ConfigType
+from homeassistant.const import Platform
+from .pypca import PCA
 
 DOMAIN = "pca301"
+PLATFORMS = [Platform.SWITCH]
+_LOGGER = logging.getLogger(__name__)
 
-DEFAULT_DEVICE = "/dev/ttyUSB0"
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up PCA301 from a config entry."""
+    port = entry.data.get("port") or entry.data.get("device") or "/dev/ttyUSB0"
+    pca = PCA(port)
+    await pca.async_load_known_devices(hass)
+    pca.open()
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = pca
 
-PCA301_PLATFORMS = [Platform.SWITCH]
+    async def async_scan_for_new_devices_service(call):
+        _LOGGER.info("Service pca301.scan_for_new_devices called, starting scan...")
+        await hass.async_add_executor_job(pca.start_scan)
 
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            {vol.Optional(CONF_DEVICE, default=DEFAULT_DEVICE): cv.string}
-        )
-    },
-    extra=vol.ALLOW_EXTRA,
-)
+    hass.services.async_register(
+        DOMAIN, "scan_for_new_devices", async_scan_for_new_devices_service
+    )
 
-
-def setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the PCA switch platform via YAML."""
-    if DOMAIN not in config:
-        # Keine YAML-Konfiguration vorhanden, Integration wird ignoriert
-        return True
-
-    for platform in PCA301_PLATFORMS:
-        discovery.load_platform(
-            hass, platform, DOMAIN, {"device": config[DOMAIN][CONF_DEVICE]}, config
-        )
-
+    # Register platforms (e.g. switch)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
-
-async def async_setup_entry(hass, entry):
-    """Set up PCA301 from a config entry."""
-    await hass.config_entries.async_forward_entry_setups(entry, PCA301_PLATFORMS)
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    hass.data[DOMAIN].pop(entry.entry_id, None)
     return True

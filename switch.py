@@ -33,40 +33,32 @@ def setup_platform(
     serial_device = discovery_info["device"]
     try:
         pca = pypca.PCA(serial_device)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(pca.async_load_known_devices(hass))
         pca.open()
         # Blockierende Aufrufe auslagern
-        import asyncio
-        loop = asyncio.get_event_loop()
         devices = loop.run_until_complete(hass.async_add_executor_job(pca.get_devices))
         entities = [SmartPlugSwitch(hass, pca, device) for device in devices]
         add_entities(entities, True)
     except SerialException as exc:
         _LOGGER.warning("Unable to open serial port: %s", exc)
         return
-    hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, pca.close)
-    loop.run_until_complete(hass.async_add_executor_job(pca.start_scan))
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up PCA301 switch platform from a config entry."""
+    _LOGGER.info(f"async_setup_entry: {entry.data.get('device')}")
     serial_device = entry.data.get("device")
     try:
-        pca = pypca.PCA(serial_device)
-        await pca.async_load_known_devices(hass)
-        pca.open()
-        devices = await hass.async_add_executor_job(pca.get_devices)
-
-        # Create a lock for serial communication
+        # Use the already initialized PCA instance from __init__.py
+        pca = hass.data["pca301"][entry.entry_id]
         pca_lock = asyncio.Lock()
 
-        # Store pca and lock in hass.data for access by all entities
-        if "pca301" not in hass.data:
-            hass.data["pca301"] = {}
-        hass.data["pca301"][serial_device] = {"pca": pca, "lock": pca_lock}
+        devices = await hass.async_add_executor_job(pca.get_devices)
+        _LOGGER.info(f"PCA301 connected: {devices.keys()}")
 
         entities = []
         for device in devices.keys():
-            # Prüfe, ob das Gerät erreichbar ist (Statusabfrage)
             try:
                 state = await hass.async_add_executor_job(pca.get_state, device)
             except Exception:
@@ -83,10 +75,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         _LOGGER.warning("Unable to open serial port: %s", exc)
         return
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, pca.close)
-    await hass.async_add_executor_job(pca.start_scan)
+
+
 class PowerSensor(SensorEntity):
     SCAN_INTERVAL = timedelta(seconds=10)
-    
+
     def __init__(self, hass, pca, pca_lock, device_id):
         self.hass = hass
         self._pca = pca
@@ -103,7 +96,9 @@ class PowerSensor(SensorEntity):
     async def async_update(self):
         try:
             async with self._pca_lock:
-                self._state = await self.hass.async_add_executor_job(self._pca.get_current_power, self._device_id)
+                self._state = await self.hass.async_add_executor_job(
+                    self._pca.get_current_power, self._device_id
+                )
             self._available = True
         except Exception as ex:
             if self._available:
@@ -131,9 +126,10 @@ class PowerSensor(SensorEntity):
             "model": "PCA301",
         }
 
+
 class ConsumptionSensor(SensorEntity):
     SCAN_INTERVAL = timedelta(seconds=10)
-    
+
     def __init__(self, hass, pca, pca_lock, device_id):
         self.hass = hass
         self._pca = pca
@@ -150,11 +146,15 @@ class ConsumptionSensor(SensorEntity):
     async def async_update(self):
         try:
             async with self._pca_lock:
-                self._state = await self.hass.async_add_executor_job(self._pca.get_total_consumption, self._device_id)
+                self._state = await self.hass.async_add_executor_job(
+                    self._pca.get_total_consumption, self._device_id
+                )
             self._available = True
         except Exception as ex:
             if self._available:
-                _LOGGER.warning("Could not read consumption for %s: %s", self._device_id, ex)
+                _LOGGER.warning(
+                    "Could not read consumption for %s: %s", self._device_id, ex
+                )
             self._available = False
 
     @property
@@ -181,7 +181,7 @@ class ConsumptionSensor(SensorEntity):
 
 class SmartPlugSwitch(SwitchEntity):
     SCAN_INTERVAL = timedelta(seconds=10)
-    
+
     """Representation of a PCA Smart Plug switch."""
     def __init__(self, hass, pca, pca_lock, device_id):
         """Initialize the switch."""

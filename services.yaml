@@ -1,0 +1,4 @@
+add_device:
+  name: Add device
+  description: Startet den Scan nach neuen PCA301-Geräten (wie "Add device"-Button)
+  fields: {}
