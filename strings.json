@@ -1,0 +1,10 @@
+{
+  "config": {
+    "step": {
+      "scan": {
+        "title": "Scan for new devices",
+        "description": "Please press the button on PCA301. Scanning for new devices..."
+      }
+    }
+  }
+}

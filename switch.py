@@ -28,6 +28,8 @@ def setup_platform(
     discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the PCA switch platform (YAML)."""
+
+    pca_lock = asyncio.Lock()
     if discovery_info is None:
         return
     serial_device = discovery_info["device"]
@@ -38,7 +40,7 @@ def setup_platform(
         pca.open()
         # Blockierende Aufrufe auslagern
         devices = loop.run_until_complete(hass.async_add_executor_job(pca.get_devices))
-        entities = [SmartPlugSwitch(hass, pca, device) for device in devices]
+        entities = [SmartPlugSwitch(hass, pca, pca_lock, device) for device in devices]
         add_entities(entities, True)
     except SerialException as exc:
         _LOGGER.warning("Unable to open serial port: %s", exc)
@@ -48,151 +50,75 @@ def setup_platform(
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up PCA301 switch platform from a config entry."""
     _LOGGER.info(f"async_setup_entry: {entry.data.get('device')}")
-    serial_device = entry.data.get("device")
     try:
-        # Use the already initialized PCA instance from __init__.py
         pca = hass.data["pca301"][entry.entry_id]
         pca_lock = asyncio.Lock()
 
-        devices = await hass.async_add_executor_job(pca.get_devices)
-        _LOGGER.info(f"PCA301 connected: {devices.keys()}")
+        # Prefer devices from config entry options (from scan)
+        device_ids = entry.options.get("devices")
+        if device_ids is None:
+            # Fallback: Get devices from registry (populated in __init__.py)
+            registry_devices = hass.data["pca301"].get(f"{entry.entry_id}_devices", [])
+            device_ids = []
+            for device in registry_devices:
+                for ident in device.identifiers:
+                    if ident[0] == "pca301":
+                        device_ids.append(ident[1])
 
         entities = []
-        for device in devices.keys():
-            try:
-                state = await hass.async_add_executor_job(pca.get_state, device)
-            except Exception:
-                _LOGGER.warning(f"PCA301 device {device} not reachable, skipping.")
-                continue
-            switch = SmartPlugSwitch(hass, pca, pca_lock, device)
-            power = PowerSensor(hass, pca, pca_lock, device)
-            consumption = ConsumptionSensor(hass, pca, pca_lock, device)
+        for device_id in device_ids:
+            device_data = pca._devices.get(device_id, {})
+            initial_state = device_data.get("state", None)
+            switch = SmartPlugSwitch(
+                hass, pca, pca_lock, device_id, initial_value=initial_state
+            )
+            switch._attr_entity_registry_enabled_default = False
             entities.append(switch)
-            entities.append(power)
-            entities.append(consumption)
-        async_add_entities(entities, True)
+        async_add_entities(entities)
+        # Force state update for initial values
+        for entity in entities:
+            entity.async_write_ha_state()
+
+        # Listen for new devices via dispatcher
+        from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+        async def async_add_new_devices(new_device_ids):
+            for device_id in new_device_ids:
+                switch = SmartPlugSwitch(hass, pca, pca_lock, device_id)
+                switch._attr_entity_registry_enabled_default = False
+                async_add_entities([switch])
+
+        async_dispatcher_connect(
+            hass,
+            f"pca301_new_devices_{entry.entry_id}",
+            async_add_new_devices,
+        )
     except SerialException as exc:
         _LOGGER.warning("Unable to open serial port: %s", exc)
         return
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, pca.close)
 
 
-class PowerSensor(SensorEntity):
-    SCAN_INTERVAL = timedelta(seconds=10)
-
-    def __init__(self, hass, pca, pca_lock, device_id):
-        self.hass = hass
-        self._pca = pca
-        self._pca_lock = pca_lock
-        self._device_id = device_id
-        self._attr_name = f"PCA301 Power {device_id}"
-        self._attr_native_unit_of_measurement = "W"
-        self._attr_device_class = "power"
-        self._attr_state_class = "measurement"
-        self._attr_icon = "mdi:flash"
-        self._state = None
-        self._available = True
-
-    async def async_update(self):
-        try:
-            async with self._pca_lock:
-                self._state = await self.hass.async_add_executor_job(
-                    self._pca.get_current_power, self._device_id
-                )
-            self._available = True
-        except Exception as ex:
-            if self._available:
-                _LOGGER.warning("Could not read power for %s: %s", self._device_id, ex)
-            self._available = False
-
-    @property
-    def available(self) -> bool:
-        return self._available
-
-    @property
-    def native_value(self):
-        return self._state
-
-    @property
-    def unique_id(self):
-        return f"pca301_power_{self._device_id}"
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {("pca301", self._device_id)},
-            "name": f"PCA301 {self._device_id}",
-            "manufacturer": "ELV",
-            "model": "PCA301",
-        }
-
-
-class ConsumptionSensor(SensorEntity):
-    SCAN_INTERVAL = timedelta(seconds=10)
-
-    def __init__(self, hass, pca, pca_lock, device_id):
-        self.hass = hass
-        self._pca = pca
-        self._pca_lock = pca_lock
-        self._device_id = device_id
-        self._attr_name = f"PCA301 Consumption {device_id}"
-        self._attr_native_unit_of_measurement = "kWh"
-        self._attr_device_class = "energy"
-        self._attr_state_class = "total_increasing"
-        self._attr_icon = "mdi:counter"
-        self._state = None
-        self._available = True
-
-    async def async_update(self):
-        try:
-            async with self._pca_lock:
-                self._state = await self.hass.async_add_executor_job(
-                    self._pca.get_total_consumption, self._device_id
-                )
-            self._available = True
-        except Exception as ex:
-            if self._available:
-                _LOGGER.warning(
-                    "Could not read consumption for %s: %s", self._device_id, ex
-                )
-            self._available = False
-
-    @property
-    def available(self) -> bool:
-        return self._available
-
-    @property
-    def native_value(self):
-        return self._state
-
-    @property
-    def unique_id(self):
-        return f"pca301_consumption_{self._device_id}"
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {("pca301", self._device_id)},
-            "name": f"PCA301 {self._device_id}",
-            "manufacturer": "ELV",
-            "model": "PCA301",
-        }
-
-
 class SmartPlugSwitch(SwitchEntity):
     SCAN_INTERVAL = timedelta(seconds=10)
 
     """Representation of a PCA Smart Plug switch."""
-    def __init__(self, hass, pca, pca_lock, device_id):
+
+    def __init__(self, hass, pca, pca_lock, device_id, initial_value=None):
         """Initialize the switch."""
         self.hass = hass
         self._device_id = device_id
-        self._name = f"PCA301 Switch {device_id}"
-        self._state = None
-        self._available = True
+        self._name = f"PCA301 {device_id} Switch"
+        self._state = initial_value
+        self._available = initial_value is not None
         self._pca = pca
         self._pca_lock = pca_lock
         self._attr_icon = "mdi:power"
+
+    async def async_added_to_hass(self):
+        """Call when entity is added to hass."""
+        self.async_write_ha_state()
+
     @property
     def unique_id(self):
         return f"pca301_switch_{self._device_id}"

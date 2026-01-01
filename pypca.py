@@ -1,27 +1,44 @@
-from pathlib import Path
-from time import time
+"""PCA301 serial protocol handler for Home Assistant integration.
+
+This module provides the PCA class for managing PCA301 smart plugs via serial communication,
+including device discovery, state updates, and integration with Home Assistant registries.
+"""
+
 import logging
-import serial
 import re
 import threading
-import json
-import time
+from pathlib import Path
+from time import time
+
+import asyncio
+import serial
+
+from homeassistant.helpers import (
+    entity_registry as er,
+    device_registry as dr,
+)
 
 SEND_SUFFIX = "s"
 
 _LOGGER = logging.getLogger(__name__)
 home = str(Path.home())
 
+
 class PCA:
+    _hass = None
     _serial = None
     _stopevent = None
     _thread = None
-    _re_reading = re.compile(r"OK 24 (\d+) 4 (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)")
-    _re_devices = re.compile(r"L 24 (\d+) (\d+) : (\d+) 4 (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)")
-    DEVICES_FILE = None  # Wird dynamisch gesetzt
+    _re_reading = re.compile(
+        r"OK 24 (\d+) 4 (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)"
+    )
+    _re_devices = re.compile(
+        r"L 24 (\d+) (\d+) : (\d+) 4 (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)"
+    )
 
-    def __init__(self, port, timeout=2):
+    def __init__(self, hass, port, timeout=2):
         self._devices = {}
+        self._hass = hass
         self._port = port
         self._baud = 57600
         self._timeout = timeout
@@ -29,56 +46,59 @@ class PCA:
         self._known_devices = {}  # deviceId: channel
 
     async def async_load_known_devices(self, hass):
-        # Setze DEVICES_FILE auf das HA-Config-Verzeichnis
-        self.DEVICES_FILE = hass.config.path(".pca_devices.json")
-        def _load_known_devices():
-            try:
-                _LOGGER.info(f"Trying to read PCA devices file at: {self.DEVICES_FILE}")
-                with open(self.DEVICES_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                _LOGGER.info(f"Successfully read PCA devices file at: {self.DEVICES_FILE}")
-                return data
-            except Exception as e:
-                _LOGGER.warning(f"Could not read PCA devices file at: {self.DEVICES_FILE}: {e}")
-                return {}
-        def _write_known_devices():
-            try:
-                _LOGGER.info(f"Writing PCA devices file at: {self.DEVICES_FILE}")
-                with open(self.DEVICES_FILE, "w", encoding="utf-8") as f:
-                    json.dump(self._known_devices, f, ensure_ascii=False, indent=2)
-                _LOGGER.info(f"Successfully wrote PCA devices file at: {self.DEVICES_FILE}")
-            except Exception as e:
-                _LOGGER.error(f"Could not write PCA devices file at: {self.DEVICES_FILE}: {e}")
-        self._known_devices = await hass.async_add_executor_job(_load_known_devices)
-        if not self._known_devices:
-            # Datei anlegen, falls sie nicht existiert
-            await hass.async_add_executor_job(_write_known_devices)
+        # No-op: Devices will be loaded from the Home Assistant device registry or entry.options.
+        pass
 
     def open(self):
         _LOGGER.info(f"Opening serial port {self._port}")
-        self._serial.port = self._port
-        self._serial.baudrate = self._baud
-        self._serial.timeout = self._timeout
-        self._serial.open()
-        self._serial.flushInput()
-        self._serial.flushOutput()
-        self.get_ready()
-        _LOGGER.info(f"Serial port {self._port} opened and ready.")
-        self._start_worker()
+        try:
+            if self._serial.is_open:
+                _LOGGER.warning(
+                    f"Serial port {self._port} already open, closing first."
+                )
+                self._serial.close()
+            self._serial.port = self._port
+            self._serial.baudrate = self._baud
+            self._serial.timeout = self._timeout
+            self._serial.open()
+            # self._serial.flushInput()
+            # self._serial.flushOutput()
+            self.get_ready()
+            _LOGGER.info(f"Serial port {self._port} opened and ready.")
+            self._start_worker()
+        except serial.SerialException as e:
+            _LOGGER.error(f"Error opening serial port {self._port}: {e}")
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            raise
 
     def close(self):
         _LOGGER.info(f"Closing serial port {self._port}")
         self._stop_worker()
-        self._serial.close()
-        _LOGGER.info(f"Serial port {self._port} closed.")
+        try:
+            if self._serial.is_open:
+                self._serial.close()
+                _LOGGER.info(f"Serial port {self._port} closed.")
+        except Exception as e:
+            _LOGGER.warning(f"Error closing serial port {self._port}: {e}")
 
     def get_ready(self):
-        line = self._serial.readline().decode("utf-8")
-        start = time()
-        timeout = 2
-        while self._re_reading.match(line) is None and time() - start < timeout:
+        try:
             line = self._serial.readline().decode("utf-8")
-        return True
+            start = time()
+            timeout = 2
+            while self._re_reading.match(line) is None and time() - start < timeout:
+                line = self._serial.readline().decode("utf-8")
+            return True
+        except serial.SerialException as e:
+            _LOGGER.error(f"Error reading from serial port: {e}")
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            raise
 
     def get_devices(self):
         """Gibt die aktuelle Geräteliste zurück (ohne Scan)."""
@@ -100,7 +120,11 @@ class PCA:
         return self._devices[deviceId]["consumption"]
 
     def get_state(self, deviceId):
-        return self._devices[deviceId]["state"]
+        # Return None if device or state is missing to avoid KeyError
+        device = self._devices.get(deviceId)
+        if device is None:
+            return None
+        return device.get("state")
 
     def _stop_worker(self):
         if self._stopevent is not None:
@@ -109,7 +133,7 @@ class PCA:
             self._thread.join()
 
     def start_scan(self, fast=0):
-        """Starte das Scannen nach neuen Geräten (Discovery)."""
+        """Starte das Scannen nach neuen Geräten (Discovery). Gibt Liste neuer Geräte-IDs zurück."""
         _LOGGER.info("Please press the button on your PCA")
         self._stop_worker()
 
@@ -119,12 +143,14 @@ class PCA:
                 self.open()
             except Exception as e:
                 _LOGGER.error(f"Could not open serial port {self._port}: {e}")
-                return
-        line = []
+                return []
         start = int(time())
         found = False
         DISCOVERY_TIME = 5 if fast else 15
         DISCOVERY_TIMEOUT = 5 if fast else 30
+        _LOGGER.debug("Known devices before scan: %s", list(self._known_devices.keys()))
+        _LOGGER.debug("Devices before scan: %s", list(self._devices.keys()))
+
         # Vorhandene Geräte initialisieren
         for device, channel in self._known_devices.items():
             self._devices[device] = {}
@@ -132,11 +158,32 @@ class PCA:
             self._devices[device]['consumption'] = 0
             self._devices[device]['power'] = 0
             self._devices[device]['channel'] = channel
-        while not (int(time()) - start > DISCOVERY_TIMEOUT) or not (int(time()) - start > DISCOVERY_TIME or found):
-            line = self._serial.readline().decode("utf-8")
-            _LOGGER.debug(f"Received line: {line.strip()}")
-            if len(line) > 1:
-                line = line.split(" ")
+        new_device_ids = []
+        while not (int(time()) - start > DISCOVERY_TIMEOUT) or not (
+            int(time()) - start > DISCOVERY_TIME or found
+        ):
+            try:
+                raw_line = self._serial.readline().decode("utf-8")
+            except Exception as e:
+                _LOGGER.error(f"Error reading from serial port: {e}")
+                continue
+            line_stripped = raw_line.strip()
+            if len(line_stripped) < 2:
+                continue
+            _LOGGER.debug(f"Received line: {line_stripped}")
+            line = line_stripped.split(" ")
+            _LOGGER.debug(f"Parsed line: {line}")
+
+            if len(line) > 12:
+                while line[0] != "OK" and len(line) >= 12:
+                    line.pop(0)
+                    continue
+
+            if len(line) < 12:
+                _LOGGER.warning(f"Malformed device response (too short): {line}")
+                continue
+
+            try:
                 if line[8] != '170' or line[9] != '170':
                     deviceId = str(line[4]).zfill(3) + str(line[5]).zfill(3) + str(line[6]).zfill(3)
                     channel = line[2]  # Channel ist an Position 2 laut PCA301 Protokoll
@@ -150,17 +197,15 @@ class PCA:
                     else:
                         _LOGGER.info(f"New device found: {deviceId} (channel {channel}), will wait for another device for {DISCOVERY_TIME} seconds...")
                         self._known_devices[deviceId] = channel
+                        new_device_ids.append(deviceId)
                         found = True
                         start = time()
-        try:
-            _LOGGER.info(f"Writing PCA devices file at: {self.DEVICES_FILE}")
-            with open(self.DEVICES_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._known_devices, f, ensure_ascii=False, indent=2)
-            _LOGGER.info(f"Successfully wrote PCA devices file at: {self.DEVICES_FILE}")
-        except Exception as e:
-            _LOGGER.error(f"Could not write PCA devices file at: {self.DEVICES_FILE}: {e}")
+            except Exception as e:
+                _LOGGER.error(f"Error parsing device response: {line} - {e}")
+                continue
         _LOGGER.info(f"Devices found: {list(self._devices.keys())}")
         self._start_worker()
+        return new_device_ids
 
     def _write_cmd(self, cmd):
         _LOGGER.info(f"Sending command to PCA301: {cmd}")
@@ -228,6 +273,14 @@ class PCA:
                         + str(line[5]).zfill(3)
                         + str(line[6]).zfill(3)
                     )
+                    # Ensure device dict exists
+                    if deviceId not in self._devices:
+                        self._devices[deviceId] = {
+                            "state": None,
+                            "power": None,
+                            "consumption": None,
+                            "channel": None,
+                        }
                     self._devices[deviceId]["power"] = (
                         int(line[8]) * 256 + int(line[9])
                     ) / 10.0
@@ -235,6 +288,9 @@ class PCA:
                     self._devices[deviceId]["consumption"] = (
                         int(line[10]) * 256 + int(line[11])
                     ) / 100.0
+                    # Notify Home Assistant to enable entities for this device
+                    if hasattr(self, "_hass") and self._hass:
+                        self.notify_new_data(self._hass, deviceId)
             except serial.SerialException as e:
                 _LOGGER.warning(
                     f"Serial exception in refresh thread: {e}, exiting thread."
@@ -242,6 +298,36 @@ class PCA:
                 break
             except Exception as e:
                 _LOGGER.error(f"Unexpected exception in refresh thread: {e}")
+
+    def notify_new_data(self, hass, device_id):
+        """Enable entities for a device when new data is received."""
+
+        async def _enable_entities():
+            entity_registry = er.async_get(hass)
+            device_registry = dr.async_get(hass)
+            # Find the device entry for this device_id
+            target_device = None
+            for device in device_registry.devices.values():
+                for ident in device.identifiers:
+                    if ident[0] == "pca301" and ident[1] == device_id:
+                        target_device = device
+                        break
+                if target_device:
+                    break
+            if not target_device:
+                return
+            # Enable all entities for this device
+            for entity in list(entity_registry.entities.values()):
+                if (
+                    entity.device_id == target_device.id
+                    and entity.disabled_by is not None
+                ):
+                    entity_registry.async_update_entity(
+                        entity.entity_id, disabled_by=None
+                    )
+
+        # Schedule the enabling in the event loop in a thread-safe way
+        hass.loop.call_soon_threadsafe(lambda: asyncio.create_task(_enable_entities()))
 
     def status_request(self, deviceId, timeout=2):
         """Send a status request command to the device and wait for a fresh response."""
@@ -254,7 +340,7 @@ class PCA:
         cmd = [chan, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
         self._write_cmd(cmd)
         # Wait for a new value in self._devices[deviceId]["state"]
-        start = time.time()
+        start = time()
         last_state = self._devices.get(deviceId, {}).get("state")
         while time.time() - start < timeout:
             new_state = self._devices.get(deviceId, {}).get("state")

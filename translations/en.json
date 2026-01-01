@@ -1,6 +1,10 @@
 {
   "config": {
     "step": {
+      "scan": {
+        "title": "Scan for new devices",
+        "description": "Please press the button on PCA301. Scanning for new devices..."
+      },
       "user": {
         "title": "Set up PCA301",
         "description": "Please select the serial port your PCA301 is connected to"
