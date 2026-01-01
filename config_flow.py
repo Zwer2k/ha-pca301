@@ -43,16 +43,15 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step of the config flow."""
         errors = {}
         hass = self.hass
-        usb_ports = await hass.async_add_executor_job(glob.glob, '/dev/ttyUSB*')
-        acm_ports = await hass.async_add_executor_job(glob.glob, '/dev/ttyACM*')
+        usb_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyUSB*")
+        acm_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyACM*")
         serial_ports = usb_ports + acm_ports
         port_options = serial_ports if serial_ports else [DEFAULT_DEVICE]
 
         if user_input is not None:
             if CONF_DEVICE in user_input:
-                # After selecting device, go to scan step
                 self._selected_device = user_input[CONF_DEVICE]
-                return await self.async_step_scan()
+                return await self.async_step_scan_press_button()
             errors["base"] = "no_device_selected"
 
         return self.async_show_form(
@@ -65,6 +64,16 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_scan_press_button(self, user_input=None):
+        """Show instructions to press the button on PCA301 before scan."""
+        if user_input is not None:
+            return await self.async_step_scan()
+        return self.async_show_form(
+            step_id="scan_press_button",
+            description_placeholders={},
+            last_step=False,
         )
 
     @progress_step()
@@ -181,8 +190,16 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         """Show the options menu."""
-        return self.async_show_menu(
-            step_id="init", menu_options=["scan_for_new_devices"]
+        return self.async_show_menu(step_id="init", menu_options=["scan_press_button"])
+
+    async def async_step_scan_press_button(self, user_input=None):
+        """Show instructions to press the button on PCA301 before scan."""
+        if user_input is not None:
+            return await self.async_step_scan_for_new_devices()
+        return self.async_show_form(
+            step_id="scan_press_button",
+            description_placeholders={},
+            last_step=False,
         )
 
     @progress_step()

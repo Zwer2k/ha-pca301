@@ -2,12 +2,12 @@
   "domain": "pca301",
   "name": "PCA301",
   "version": "1.0.0",
-  "codeowners": ["zwer2k"],
-  "documentation": "https://github.com/zwer2k/pca301",
+  "codeowners": ["@Zwer2k"],
+  "documentation": "https://github.com/Zwer2k/ha-pca301#readme",
   "description": "This integration is derived from and extends the original Home Assistant integration.",
   "iot_class": "local_polling",
   "loggers": ["pypca"],
-  "quality_scale": "legacy",
-  "requirements": ["pypca==0.0.7"],
+  "quality_scale": "silver",
+  "requirements": ["pyserial>=3.5"],
   "config_flow": true
 }

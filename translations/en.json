@@ -1,13 +1,17 @@
 {
   "config": {
     "step": {
-      "scan": {
-        "title": "Scan for new devices",
-        "description": "Please press the button on PCA301. Scanning for new devices..."
-      },
       "user": {
         "title": "Set up PCA301",
         "description": "Please select the serial port your PCA301 is connected to"
+      }
+      ,
+      "scan_press_button": {
+        "title": "Search for new PCA301 devices",
+        "description": "After the scan has started, please press the button on your PCA301."
+      },
+      "scan": {
+        "title": "Search for new PCA301 devices"
       }
     }
   },
@@ -16,8 +20,12 @@
       "init": {
         "title": "PCA301 options",
         "menu_options": {
-            "scan_for_new_devices": "Scan for new devices"
+            "scan_press_button": "Scan for new devices"
         }
+      },
+      "scan_press_button": {
+        "title": "Search for new PCA301 devices",
+        "description": "Please press the button on your PCA301 now to start the scan."
       },
       "scan_for_new_devices": {
         "title": "Search for new PCA301 devices",
