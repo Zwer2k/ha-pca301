@@ -1,26 +1,30 @@
 """PCA301 sensor platform for Home Assistant."""
 from __future__ import annotations
-from datetime import timedelta
-import logging
+
 import asyncio
+import logging
+from datetime import timedelta
+
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import EntityCategory
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up PCA301 sensor platform from a config entry."""
-    import asyncio
     pca = hass.data["pca301"][entry.entry_id]
     pca_lock = asyncio.Lock()
 
-    # Prefer devices from config entry options (from scan)
-    device_ids = entry.options.get("devices")
-    if device_ids is None:
-        # Fallback: Get devices from registry (populated in __init__.py)
-        from homeassistant.helpers import device_registry as dr
+    # Get devices from channel mapping in options
+    channel_mapping = entry.options.get("channels", {})
+    device_ids = list(channel_mapping.keys())
+
+    # If no channel mapping, fallback to registry
+    if not device_ids:
         device_registry = dr.async_get(hass)
         registry_devices = [
             device
@@ -34,8 +38,20 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 if ident[0] == "pca301":
                     device_ids.append(ident[1])
 
+    _LOGGER.info(
+        f"[PCA301] Gerätezustände in async_setup_entry: _devices={pca._devices}"
+    )
     entities = []
     for device_id in device_ids:
+        # Ensure device exists in pca._devices
+        if device_id not in pca._devices and device_id in pca._known_devices:
+            pca._devices[device_id] = {
+                "state": 0,
+                "consumption": 0,
+                "power": 0,
+                "channel": pca._known_devices[device_id],
+            }
+
         device_data = pca._devices.get(device_id, {})
         power = device_data.get("power", 0)
         consumption = device_data.get("consumption", 0)
@@ -49,7 +65,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entity.async_write_ha_state()
 
     # Listen for new devices via dispatcher
-    from homeassistant.helpers.dispatcher import async_dispatcher_connect
     async def async_add_new_devices(new_device_ids):
         for device_id in new_device_ids:
             async_add_entities([

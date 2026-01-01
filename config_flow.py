@@ -1,15 +1,25 @@
 """Config flow for PCA301 integration."""
 
+import asyncio
+import contextlib
 import glob
-import voluptuous as vol
-from homeassistant import config_entries
-from homeassistant.core import callback
-from homeassistant.const import CONF_DEVICE
-from .const import DOMAIN, DEFAULT_DEVICE
+import logging
 
-from homeassistant.helpers.translation import async_get_cached_translations
-from homeassistant.helpers.selector import TextSelector
+
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
+
+from homeassistant import config_entries
+from homeassistant.const import CONF_DEVICE
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import progress_step
+from homeassistant.helpers.selector import TextSelector
+from homeassistant.helpers.translation import async_get_cached_translations
+
+from .const import DOMAIN, DEFAULT_DEVICE
+from .pypca import PCA
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -17,6 +27,11 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
+
+    def __init__(self):
+        """Initialize the config flow."""
+        super().__init__()
+        self._selected_device = None
 
     @staticmethod
     @callback
@@ -38,8 +53,7 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # After selecting device, go to scan step
                 self._selected_device = user_input[CONF_DEVICE]
                 return await self.async_step_scan()
-            else:
-                errors["base"] = "no_device_selected"
+            errors["base"] = "no_device_selected"
 
         return self.async_show_form(
             step_id="user",
@@ -58,48 +72,100 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show sandglass and start scan in background using progress_step decorator."""
         device = getattr(self, "_selected_device", None)
         if device is None:
-            # Show error if device is not set
             return self.async_show_form(
                 step_id="user",
                 errors={"base": "no_device_selected"},
             )
-        try:
-            from .pypca import PCA
-            import logging
 
-            logger = logging.getLogger(__name__)
+        # Suche existierenden ConfigEntry für das gewählte device
+        config_entries_list = self.hass.config_entries.async_entries(DOMAIN)
+        entry_to_reload = None
+        for config_entry in config_entries_list:
+            if (
+                config_entry.data.get("port") == device
+                or config_entry.data.get("device") == device
+            ):
+                entry_to_reload = config_entry
+                break
+
+        # Wenn Integration geladen, temporär entladen
+        if entry_to_reload:
+            _LOGGER.info(
+                f"[PCA301] entry_to_reload.state vor Unload: {entry_to_reload.state}"
+            )
+        if entry_to_reload and entry_to_reload.state == entry_to_reload.State.LOADED:
+            _LOGGER.info(
+                f"[PCA301] Unloading integration for port {device} before scan..."
+            )
+            await self.hass.config_entries.async_unload_entry(entry_to_reload.entry_id)
+            _LOGGER.info(
+                f"[PCA301] entry_to_reload.state nach Unload: {entry_to_reload.state}"
+            )
+            # Warten, damit der Port wirklich freigegeben ist
+            await asyncio.sleep(1)
+
+        try:
+            logger = _LOGGER
             logger.info(f"Starting direct scan for new devices on {device}")
             pca = PCA(self.hass, device)
             await pca.async_load_known_devices(self.hass)
             new_device_ids = await self.hass.async_add_executor_job(pca.start_scan)
             logger.info(f"Direct scan complete, found: {new_device_ids}")
-            # Ensure serial port is closed after scan to avoid multiple access
             try:
                 pca.close()
             except Exception as close_err:
                 logger.warning(f"Error closing serial port after scan: {close_err}")
-            # Persistiere Channel-Mapping (auch für initialen Flow!)
-            from . import save_channel_mapping
 
-            logger.debug(
-                f"[PCA301] Vor save_channel_mapping (ConfigFlow): device={device}, known_devices={pca._known_devices}"
+            # Speichere Channel-Mapping direkt
+            if entry_to_reload:
+                new_channels = pca.known_devices.copy()
+                _LOGGER.info(
+                    f"[PCA301] Speichere Channel-Mapping in entry.options: {new_channels}"
+                )
+                options = dict(entry_to_reload.options)
+                options["channels"] = new_channels
+                self.hass.config_entries.async_update_entry(
+                    entry_to_reload, options=options
+                )
+
+            _LOGGER.info(
+                f"[PCA301] Gerätezustände nach Scan (ConfigFlow): _devices={pca._devices}"
             )
-            await save_channel_mapping(self.hass, device, pca._known_devices)
         except Exception as err:
-            import logging
-
-            logging.getLogger(__name__).error("Direct scan failed: %s", err)
+            _LOGGER.error("Direct scan failed: %s", err)
+            # Nach Fehler Integration ggf. wieder laden
+            if (
+                entry_to_reload
+                and entry_to_reload.state == entry_to_reload.State.NOT_LOADED
+            ):
+                await self.hass.config_entries.async_setup(entry_to_reload.entry_id)
             return self.async_show_form(
                 step_id="user",
                 errors={"base": "scan_failed"},
             )
-        # Persist found devices and channel mapping to options so async_setup_entry kann sie nutzen
+
+        # Nach Scan Integration wieder laden
+        if (
+            entry_to_reload
+            and entry_to_reload.state == entry_to_reload.State.NOT_LOADED
+        ):
+            _LOGGER.info(
+                f"[PCA301] entry_to_reload.state vor Reload: {entry_to_reload.state}"
+            )
+            _LOGGER.info(
+                f"[PCA301] Reloading integration for port {device} after scan..."
+            )
+            await self.hass.config_entries.async_setup(entry_to_reload.entry_id)
+            _LOGGER.info(
+                f"[PCA301] entry_to_reload.state nach Reload: {entry_to_reload.state}"
+            )
+
         return self.async_create_entry(
             title="PCA301",
             data={CONF_DEVICE: self._selected_device},
             options={
                 "devices": new_device_ids,
-                "channels": pca._known_devices.copy(),
+                "channels": pca.known_devices.copy(),
             },
         )
 
@@ -119,19 +185,50 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init", menu_options=["scan_for_new_devices"]
         )
 
+    @progress_step()
     async def async_step_scan_for_new_devices(self, user_input=None):
-        """Handle scanning for new devices in options flow."""
+        """Show sandglass and start scan in background using progress_step decorator (OptionsFlow)."""
         if user_input is not None:
+            # After user presses OK, finish the step and do NOT start another scan
             return self.async_create_entry(title="", data={})
 
         device = self._config_entry.data.get("device")
-        if device:
-            await self.hass.services.async_call(
-                DOMAIN,
-                "scan_for_new_devices",
-                {"device": device},
-                blocking=True,
+        if not device:
+            return self.async_create_entry(title="", data={})
+
+        # Unload integration before scan to free serial port
+        await self.hass.config_entries.async_unload(self._config_entry.entry_id)
+        await asyncio.sleep(1)
+
+        try:
+            pca = PCA(self.hass, device)
+            # Load existing channel mapping
+            if self._config_entry.options.get("channels"):
+                pca.known_devices = self._config_entry.options["channels"].copy()
+                _LOGGER.info(f"Loaded existing channel mapping: {pca.known_devices}")
+
+            new_device_ids = await self.hass.async_add_executor_job(pca.start_scan)
+            _LOGGER.info(f"Scan complete, found: {new_device_ids}")
+
+            with contextlib.suppress(Exception):
+                pca.close()
+
+            # Update options with new devices and channels
+            new_options = dict(self._config_entry.options)
+            new_options["devices"] = list(pca.known_devices.keys())
+            new_options["channels"] = pca.known_devices.copy()
+
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, options=new_options
             )
+
+        except Exception as err:
+            _LOGGER.error("Scan failed: %s", err)
+        finally:
+            # Reload integration after scan only if NOT_LOADED
+            if self._config_entry.state == ConfigEntryState.NOT_LOADED:
+                await self.hass.config_entries.async_setup(self._config_entry.entry_id)
+
         # Always show all known devices after scan
         pca = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
         all_devices = []
@@ -163,4 +260,5 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
                     )
                 }
             ),
+            last_step=True,
         )

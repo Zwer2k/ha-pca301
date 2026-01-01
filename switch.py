@@ -1,20 +1,26 @@
-from __future__ import annotations
-from datetime import timedelta
 """Support for PCA 301 smart switch."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from datetime import timedelta
 
-from . import pypca
+
+import serial
 from serial import SerialException
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from typing import Any
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+
+from . import pypca
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +40,7 @@ def setup_platform(
         return
     serial_device = discovery_info["device"]
     try:
-        pca = pypca.PCA(serial_device)
+        pca = pypca.PCA(hass, serial_device)
         loop = asyncio.get_event_loop()
         loop.run_until_complete(pca.async_load_known_devices(hass))
         pca.open()
@@ -54,10 +60,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         pca = hass.data["pca301"][entry.entry_id]
         pca_lock = asyncio.Lock()
 
-        # Prefer devices from config entry options (from scan)
-        device_ids = entry.options.get("devices")
-        if device_ids is None:
-            # Fallback: Get devices from registry (populated in __init__.py)
+        # Get devices from channel mapping in options
+        channel_mapping = entry.options.get("channels", {})
+        device_ids = list(channel_mapping.keys())
+
+        # If no channel mapping, fallback to registry
+        if not device_ids:
             registry_devices = hass.data["pca301"].get(f"{entry.entry_id}_devices", [])
             device_ids = []
             for device in registry_devices:
@@ -67,6 +75,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
         entities = []
         for device_id in device_ids:
+            # Ensure device exists in pca._devices
+            if device_id not in pca._devices and device_id in pca._known_devices:
+                pca._devices[device_id] = {
+                    "state": 0,
+                    "consumption": 0,
+                    "power": 0,
+                    "channel": pca._known_devices[device_id],
+                }
+
             device_data = pca._devices.get(device_id, {})
             initial_state = device_data.get("state", None)
             switch = SmartPlugSwitch(
@@ -78,9 +95,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # Force state update for initial values
         for entity in entities:
             entity.async_write_ha_state()
-
-        # Listen for new devices via dispatcher
-        from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
         async def async_add_new_devices(new_device_ids):
             for device_id in new_device_ids:

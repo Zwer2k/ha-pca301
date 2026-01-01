@@ -4,19 +4,16 @@ This module provides the PCA class for managing PCA301 smart plugs via serial co
 including device discovery, state updates, and integration with Home Assistant registries.
 """
 
+import asyncio
+import contextlib
 import logging
 import re
 import threading
+import time
 from pathlib import Path
-from time import time
 
-import asyncio
 import serial
-
-from homeassistant.helpers import (
-    entity_registry as er,
-    device_registry as dr,
-)
+from homeassistant.helpers import entity_registry as er, device_registry as dr
 
 SEND_SUFFIX = "s"
 
@@ -68,11 +65,18 @@ class PCA:
             self._start_worker()
         except serial.SerialException as e:
             _LOGGER.error(f"Error opening serial port {self._port}: {e}")
-            try:
+            with contextlib.suppress(Exception):
                 self._serial.close()
-            except Exception:
-                pass
             raise
+
+    @property
+    def known_devices(self):
+        """Return the known devices mapping (deviceId: channel)."""
+        return self._known_devices
+
+    @known_devices.setter
+    def known_devices(self, value):
+        self._known_devices = value
 
     def close(self):
         _LOGGER.info(f"Closing serial port {self._port}")
@@ -87,17 +91,17 @@ class PCA:
     def get_ready(self):
         try:
             line = self._serial.readline().decode("utf-8")
-            start = time()
+            start = time.time()
             timeout = 2
-            while self._re_reading.match(line) is None and time() - start < timeout:
+            while (
+                self._re_reading.match(line) is None and time.time() - start < timeout
+            ):
                 line = self._serial.readline().decode("utf-8")
             return True
         except serial.SerialException as e:
             _LOGGER.error(f"Error reading from serial port: {e}")
-            try:
+            with contextlib.suppress(Exception):
                 self._serial.close()
-            except Exception:
-                pass
             raise
 
     def get_devices(self):
@@ -136,6 +140,8 @@ class PCA:
         """Starte das Scannen nach neuen Geräten (Discovery). Gibt Liste neuer Geräte-IDs zurück."""
         _LOGGER.info("Please press the button on your PCA")
         self._stop_worker()
+        # Warten, bis der Hintergrund-Thread wirklich beendet ist
+        time.sleep(0.1)
 
         # Ensure serial port is open
         if not self._serial.is_open:
@@ -144,7 +150,7 @@ class PCA:
             except Exception as e:
                 _LOGGER.error(f"Could not open serial port {self._port}: {e}")
                 return []
-        start = int(time())
+        start = int(time.time())
         found = False
         DISCOVERY_TIME = 5 if fast else 15
         DISCOVERY_TIMEOUT = 5 if fast else 30
@@ -159,8 +165,8 @@ class PCA:
             self._devices[device]['power'] = 0
             self._devices[device]['channel'] = channel
         new_device_ids = []
-        while not (int(time()) - start > DISCOVERY_TIMEOUT) or not (
-            int(time()) - start > DISCOVERY_TIME or found
+        while not (int(time.time()) - start > DISCOVERY_TIMEOUT) or not (
+            int(time.time()) - start > DISCOVERY_TIME or found
         ):
             try:
                 raw_line = self._serial.readline().decode("utf-8")
@@ -199,22 +205,22 @@ class PCA:
                         self._known_devices[deviceId] = channel
                         new_device_ids.append(deviceId)
                         found = True
-                        start = time()
+                        start = time.time()
             except Exception as e:
-                _LOGGER.error(f"Error parsing device response: {line} - {e}")
+                _LOGGER.warning(f"Error parsing device response: {line} - {e}")
                 continue
         _LOGGER.info(f"Devices found: {list(self._devices.keys())}")
         self._start_worker()
         return new_device_ids
 
     def _write_cmd(self, cmd):
-        _LOGGER.info(f"Sending command to PCA301: {cmd}")
+        _LOGGER.debug(f"Sending command to PCA301: {cmd}")
         try:
             # Konvertiere die Bytes zu einem String mit Leerzeichen-Trennung, nur 's' als Suffix (kein Newline)
             cmd_str = ",".join(str(b) for b in cmd) + "s"
-            _LOGGER.info(f"Command string to send: {repr(cmd_str)}")
+            _LOGGER.debug(f"Command string to send: {repr(cmd_str)}")
             self._serial.write(cmd_str.encode('ascii'))
-            _LOGGER.info(f"Command sent successfully")
+            _LOGGER.debug(f"Command sent successfully")
         except Exception as e:
             _LOGGER.error(f"Error sending command: {e}")
             return
@@ -239,6 +245,9 @@ class PCA:
         self._write_cmd(cmd)
         self._devices[deviceId]["state"] = 0
         _LOGGER.info(f"PCA301 device {deviceId} state set to OFF")
+        # Nach dem Umschalten Status
+        time.sleep(0.5)
+        self.status_request(deviceId)
         return True
 
     def turn_on(self, deviceId):
@@ -253,10 +262,13 @@ class PCA:
         self._write_cmd(cmd)
         self._devices[deviceId]["state"] = 1
         _LOGGER.info(f"PCA301 device {deviceId} state set to ON")
+        # Nach dem Umschalten Status abfragen
+        time.sleep(0.5)
+        self.status_request(deviceId)
         return True
 
     def _refresh(self):
-        while not self._stopevent.isSet():
+        while not self._stopevent.is_set():
             if not self._serial or not self._serial.is_open:
                 _LOGGER.warning("Serial port closed, refresh thread exiting.")
                 break
@@ -267,6 +279,7 @@ class PCA:
                 except AttributeError:
                     line = line.decode("utf-8")
                 if self._re_reading.match(line):
+                    _LOGGER.debug("[PCA301] _refresh received line: %r", line)
                     line = line.split(" ")
                     deviceId = (
                         str(line[4]).zfill(3)
@@ -340,7 +353,7 @@ class PCA:
         cmd = [chan, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
         self._write_cmd(cmd)
         # Wait for a new value in self._devices[deviceId]["state"]
-        start = time()
+        start = time.time()
         last_state = self._devices.get(deviceId, {}).get("state")
         while time.time() - start < timeout:
             new_state = self._devices.get(deviceId, {}).get("state")
