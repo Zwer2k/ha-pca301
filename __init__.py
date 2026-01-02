@@ -1,5 +1,7 @@
 """The PCA301 integration."""
 
+
+from homeassistant.const import CONF_DEVICE
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PCA301 from a config entry."""
-    port = entry.data.get("port") or entry.data.get("device") or "/dev/ttyUSB0"
+    port = entry.data.get(CONF_DEVICE) or "/dev/ttyUSB0"
     pca = PCA(hass, port)
     # Load channel mapping from entry.options, if present
     channel_map = entry.options.get("channels")
@@ -47,18 +49,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not entries:
             _LOGGER.warning("No config entry found for PCA301 scan service.")
             return
-        device = (
-            entries[0].data.get("port")
-            or entries[0].data.get("device")
-            or "/dev/ttyUSB0"
-        )
+        device = entries[0].data.get(CONF_DEVICE) or "/dev/ttyUSB0"
         _LOGGER.info(f"Using port from config entry: {device}")
 
         # Find the matching config entry to load existing known devices
         config_entry = None
-        for entry in entries:
-            if entry.data.get("port") == device or entry.data.get("device") == device:
-                config_entry = entry
+        for entry_tmp in entries:
+            if entry.data.get(CONF_DEVICE) == device:
+                config_entry = entry_tmp
                 break
 
         pca = PCA(hass, device)
@@ -125,10 +123,7 @@ def save_channel_mapping(hass, device, known_devices):
     """Speichere das Channel-Mapping für das passende ConfigEntry in entry.options."""
     config_entries = hass.config_entries.async_entries(DOMAIN)
     for config_entry in config_entries:
-        if (
-            config_entry.data.get("port") == device
-            or config_entry.data.get("device") == device
-        ):
+        if config_entry.data.get(CONF_DEVICE) == device:
             new_channels = known_devices.copy()
             _LOGGER.info(
                 f"[PCA301] Speichere Channel-Mapping in entry.options: {new_channels}"

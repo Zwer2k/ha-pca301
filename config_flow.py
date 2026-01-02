@@ -90,10 +90,7 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entries_list = self.hass.config_entries.async_entries(DOMAIN)
         entry_to_reload = None
         for config_entry in config_entries_list:
-            if (
-                config_entry.data.get("port") == device
-                or config_entry.data.get("device") == device
-            ):
+            if config_entry.data.get(CONF_DEVICE) == device:
                 entry_to_reload = config_entry
                 break
 
@@ -209,7 +206,7 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
             # After user presses OK, finish the step and do NOT start another scan
             return self.async_create_entry(title="", data={})
 
-        device = self._config_entry.data.get("device")
+        device = self._config_entry.data.get(CONF_DEVICE)
         if not device:
             return self.async_create_entry(title="", data={})
 
@@ -227,17 +224,16 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
             new_device_ids = await self.hass.async_add_executor_job(pca.start_scan)
             _LOGGER.info(f"Scan complete, found: {new_device_ids}")
 
-            with contextlib.suppress(Exception):
-                pca.close()
-
-            # Update options with new devices and channels
+            # Update options with new device channels
             new_options = dict(self._config_entry.options)
-            new_options["devices"] = list(pca.known_devices.keys())
             new_options["channels"] = pca.known_devices.copy()
 
             self.hass.config_entries.async_update_entry(
                 self._config_entry, options=new_options
             )
+
+            with contextlib.suppress(Exception):
+                pca.close()
 
         except Exception as err:
             _LOGGER.error("Scan failed: %s", err)

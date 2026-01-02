@@ -11,7 +11,7 @@ import serial
 from serial import SerialException
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, CONF_DEVICE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -38,7 +38,7 @@ def setup_platform(
     pca_lock = asyncio.Lock()
     if discovery_info is None:
         return
-    serial_device = discovery_info["device"]
+    serial_device = discovery_info[CONF_DEVICE]
     try:
         pca = pypca.PCA(hass, serial_device)
         loop = asyncio.get_event_loop()
