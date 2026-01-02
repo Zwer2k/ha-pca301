@@ -15,22 +15,25 @@
       }
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "PCA301 options",
-        "menu_options": {
-            "scan_press_button": "Scan for new devices"
+  "config_subentries": {
+    "scan_device": {
+      "entry_type": "Scan",
+      "initiate_flow": {
+        "user": "Scan for devices"
+      },
+      "abort": {
+        "scan_complete": "Scan completed successfully.",
+        "scan_result": "Found devices:\n\n{device_list}"
+      },
+      "step": {
+        "scan_device": {
+          "title": "Scan for PCA301 devices",
+          "description": "Press the button on your PCA301 device to start the scan."
+        },
+        "scan_for_new_devices": {
+          "title": "Scan for new PCA301 devices",
+          "description": "Found devices:\n\n{device_list}"
         }
-      },
-      "scan_press_button": {
-        "title": "Search for new PCA301 devices",
-        "description": "Please press the button on your PCA301 now to start the scan."
-      },
-      "scan_for_new_devices": {
-        "title": "Search for new PCA301 devices",
-        "found_devices": "Found devices:",
-        "no_devices": "No devices found."
       }
     }
   }

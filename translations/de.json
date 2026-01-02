@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PCA301 einrichten",
+        "description": "Bitte wählen Sie den seriellen Port aus, an dem Ihr PCA301 angeschlossen ist"
+      },
+      "scan_press_button": {
+        "title": "Nach neuen PCA301-Geräten suchen",
+        "description": "Nachdem der Scan gestartet wurde, drücken Sie bitte die Taste an Ihrem PCA301."
+      },
+      "scan": {
+        "title": "Nach neuen PCA301-Geräten suchen"
+      }
+    }
+  },
+  "config_subentries": {
+    "scan_device": {
+      "entry_type": "Scan",
+      "initiate_flow": {
+        "user": "Nach Geräten suchen"
+      },
+      "abort": {
+        "scan_complete": "Scan erfolgreich abgeschlossen.",
+        "scan_result": "Gefundene Geräte:\n\n{device_list}"
+      },
+      "step": {
+        "scan_device": {
+          "title": "Nach PCA301-Geräten suchen",
+          "description": "Drücken Sie die Taste an Ihrem PCA301-Gerät, um den Scan zu starten."
+        },
+        "scan_for_new_devices": {
+          "title": "Nach neuen PCA301-Geräten suchen",
+          "description": "Gefundene Geräte:\n\n{device_list}"
+        }
+      }
+    }
+  }
+}

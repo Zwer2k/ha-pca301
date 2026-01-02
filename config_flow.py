@@ -7,7 +7,12 @@ import logging
 
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import (
+    ConfigEntryState,
+    ConfigEntry,
+    ConfigSubentryFlow,
+    SubentryFlowResult,
+)
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_DEVICE
@@ -33,11 +38,13 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         super().__init__()
         self._selected_device = None
 
-    @staticmethod
+    @classmethod
     @callback
-    def async_get_options_flow(config_entry):
-        """Return the options flow handler for PCA301."""
-        return PCA301OptionsFlowHandler(config_entry)
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Return subentries supported by this handler."""
+        return {"scan_device": PCA301ScanDeviceFlowHandler}
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step of the config flow."""
@@ -178,47 +185,48 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # The scan_for_new_devices step is not needed with progress_step pattern and can be removed.
 
 
-class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
-    """Options flow handler for PCA301 integration."""
+class PCA301ScanDeviceFlowHandler(ConfigSubentryFlow):
+    """Handle PCA301 scan device subentry flow."""
 
-    def __init__(self, config_entry):
-        """Initialize the options flow handler."""
-        self._config_entry = config_entry
+    async def async_step_user(
+        self, user_input: dict | None = None
+    ) -> SubentryFlowResult:
+        """Start the scan flow - redirects to scan_device step."""
+        return await self.async_step_scan_device(user_input)
 
-    async def async_step_init(self, user_input=None):
-        """Show the options menu."""
-        return self.async_show_menu(step_id="init", menu_options=["scan_press_button"])
-
-    async def async_step_scan_press_button(self, user_input=None):
+    async def async_step_scan_device(
+        self, user_input: dict | None = None
+    ) -> SubentryFlowResult:
         """Show instructions to press the button on PCA301 before scan."""
         if user_input is not None:
             return await self.async_step_scan_for_new_devices()
+
         return self.async_show_form(
-            step_id="scan_press_button",
+            step_id="scan_device",
             description_placeholders={},
             last_step=False,
         )
 
     @progress_step()
-    async def async_step_scan_for_new_devices(self, user_input=None):
-        """Show sandglass and start scan in background using progress_step decorator (OptionsFlow)."""
-        if user_input is not None:
-            # After user presses OK, finish the step and do NOT start another scan
-            return self.async_create_entry(title="", data={})
+    async def async_step_scan_for_new_devices(
+        self, user_input: dict | None = None
+    ) -> SubentryFlowResult:
+        """Scan and show device list directly after scan."""
+        # Get parent config entry using _get_entry()
+        config_entry = self._get_entry()
 
-        device = self._config_entry.data.get(CONF_DEVICE)
+        device = config_entry.data.get(CONF_DEVICE)
         if not device:
-            return self.async_create_entry(title="", data={})
+            return self.async_abort(reason="no_device")
 
         # Unload integration before scan to free serial port
-        await self.hass.config_entries.async_unload(self._config_entry.entry_id)
+        await self.hass.config_entries.async_unload(config_entry.entry_id)
         await asyncio.sleep(1)
-
 
         try:
             pca = PCA(self.hass, device)
             # Load existing channel mapping
-            existing_channels = self._config_entry.options.get("channels", {}).copy()
+            existing_channels = config_entry.options.get("channels", {}).copy()
             if existing_channels:
                 pca.known_devices = existing_channels.copy()
                 _LOGGER.info(f"Loaded existing channel mapping: {pca.known_devices}")
@@ -230,11 +238,11 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
             merged_channels = existing_channels.copy()
             merged_channels.update(pca.known_devices)
 
-            new_options = dict(self._config_entry.options)
+            new_options = dict(config_entry.options)
             new_options["channels"] = merged_channels
 
             self.hass.config_entries.async_update_entry(
-                self._config_entry, options=new_options
+                config_entry, options=new_options
             )
 
             with contextlib.suppress(Exception):
@@ -244,39 +252,19 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.error("Scan failed: %s", err)
         finally:
             # Reload integration after scan only if NOT_LOADED
-            if self._config_entry.state == ConfigEntryState.NOT_LOADED:
-                await self.hass.config_entries.async_setup(self._config_entry.entry_id)
+            if config_entry.state == ConfigEntryState.NOT_LOADED:
+                await self.hass.config_entries.async_setup(config_entry.entry_id)
 
         # Always show all known devices after scan
-        pca = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        pca = self.hass.data.get(DOMAIN, {}).get(config_entry.entry_id)
         all_devices = []
         if pca and hasattr(pca, "get_devices"):
             all_devices = list(pca.get_devices().keys())
 
-        language = self.hass.config.language or "en"
-        translations = async_get_cached_translations(
-            self.hass, language, "options", DOMAIN
+        device_list = "\n".join(all_devices) if all_devices else ""
+
+        return self.async_abort(
+            reason="scan_result",
+            description_placeholders={"device_list": device_list},
         )
-        found_devices_text = translations.get(
-            f"component.{DOMAIN}.options.step.scan_for_new_devices.found_devices",
-            "Gefundene Geräte:",
-        )
-        no_devices_text = translations.get(
-            f"component.{DOMAIN}.options.step.scan_for_new_devices.no_devices",
-            "Keine Geräte gefunden.",
-        )
-        if all_devices:
-            info_text = found_devices_text + "\n" + "\n".join(all_devices)
-        else:
-            info_text = no_devices_text
-        return self.async_show_form(
-            step_id="scan_for_new_devices",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("info", default=info_text): TextSelector(
-                        {"multiline": True}
-                    )
-                }
-            ),
-            last_step=True,
-        )
+
