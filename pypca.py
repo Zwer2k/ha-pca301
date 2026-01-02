@@ -41,6 +41,7 @@ class PCA:
         self._timeout = timeout
         self._serial = serial.Serial(timeout=timeout)
         self._known_devices = {}  # deviceId: channel
+        self._serial_lock = threading.Lock()  # Lock für serielle Schnittstelle
 
     async def async_load_known_devices(self, hass):
         # No-op: Devices will be loaded from the Home Assistant device registry or entry.options.
@@ -87,6 +88,10 @@ class PCA:
                 _LOGGER.info(f"Serial port {self._port} closed.")
         except Exception as e:
             _LOGGER.warning(f"Error closing serial port {self._port}: {e}")
+
+    def reset_devices(self):
+        """Leere die interne Geräteliste."""
+        self._devices = {}
 
     def get_ready(self):
         try:
@@ -141,89 +146,135 @@ class PCA:
         _LOGGER.info("Please press the button on your PCA")
         self._stop_worker()
         # Warten, bis der Hintergrund-Thread wirklich beendet ist
-        time.sleep(0.1)
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+        time.sleep(0.5)
 
-        # Ensure serial port is open
-        if not self._serial.is_open:
+        # Lock für exklusiven Zugriff während des Scannens
+        with self._serial_lock:
+            # Ensure serial port is open
+            if not self._serial.is_open:
+                try:
+                    self._serial.port = self._port
+                    self._serial.baudrate = self._baud
+                    self._serial.timeout = self._timeout
+                    self._serial.open()
+                except Exception as e:
+                    _LOGGER.error(f"Could not open serial port {self._port}: {e}")
+                    return []
+
+            # Flush Input/Output Buffer
             try:
-                self.open()
+                self._serial.reset_input_buffer()
+                self._serial.reset_output_buffer()
             except Exception as e:
-                _LOGGER.error(f"Could not open serial port {self._port}: {e}")
-                return []
-        start = int(time.time())
-        found = False
-        DISCOVERY_TIME = 5 if fast else 15
-        DISCOVERY_TIMEOUT = 5 if fast else 30
-        _LOGGER.debug("Known devices before scan: %s", list(self._known_devices.keys()))
-        _LOGGER.debug("Devices before scan: %s", list(self._devices.keys()))
+                _LOGGER.warning(f"Could not flush buffers: {e}")
 
-        # Vorhandene Geräte initialisieren
-        for device, channel in self._known_devices.items():
-            self._devices[device] = {}
-            self._devices[device]['state'] = 0
-            self._devices[device]['consumption'] = 0
-            self._devices[device]['power'] = 0
-            self._devices[device]['channel'] = channel
-        new_device_ids = []
-        while not (int(time.time()) - start > DISCOVERY_TIMEOUT) or not (
-            int(time.time()) - start > DISCOVERY_TIME or found
-        ):
-            try:
-                raw_line = self._serial.readline().decode("utf-8")
-            except Exception as e:
-                _LOGGER.error(f"Error reading from serial port: {e}")
-                continue
-            line_stripped = raw_line.strip()
-            if len(line_stripped) < 2:
-                continue
-            _LOGGER.debug(f"Received line: {line_stripped}")
-            line = line_stripped.split(" ")
-            _LOGGER.debug(f"Parsed line: {line}")
+            start = int(time.time())
+            found = False
+            DISCOVERY_TIME = 5 if fast else 15
+            DISCOVERY_TIMEOUT = 5 if fast else 30
+            _LOGGER.debug(
+                "Known devices before scan: %s", list(self._known_devices.keys())
+            )
+            _LOGGER.debug("Devices before scan: %s", list(self._devices.keys()))
 
-            if len(line) > 12:
-                while line[0] != "OK" and len(line) >= 12:
-                    line.pop(0)
+            # Vorhandene Geräte initialisieren
+            for device, channel in self._known_devices.items():
+                self._devices[device] = {}
+                self._devices[device]["state"] = 0
+                self._devices[device]["consumption"] = 0
+                self._devices[device]["power"] = 0
+                self._devices[device]["channel"] = channel
+            new_device_ids = []
+            while not (int(time.time()) - start > DISCOVERY_TIMEOUT) or not (
+                int(time.time()) - start > DISCOVERY_TIME or found
+            ):
+                try:
+                    raw_line = self._serial.readline().decode("utf-8")
+                except serial.SerialException as e:
+                    _LOGGER.error(f"Serial error during scan: {e}")
+                    # Kurze Pause und weitermachen
+                    time.sleep(0.1)
+                    continue
+                except Exception as e:
+                    _LOGGER.error(f"Error reading from serial port: {e}")
                     continue
 
-            if len(line) < 12:
-                _LOGGER.warning(f"Malformed device response (too short): {line}")
-                continue
+                # Prüfen, ob Zeile leer ist (häufig bei "multiple access")
+                if not raw_line or len(raw_line.strip()) < 2:
+                    continue
 
-            try:
-                if line[8] != '170' or line[9] != '170':
-                    deviceId = str(line[4]).zfill(3) + str(line[5]).zfill(3) + str(line[6]).zfill(3)
-                    channel = line[2]  # Channel ist an Position 2 laut PCA301 Protokoll
-                    self._devices[deviceId] = {}
-                    self._devices[deviceId]["power"] = (int(line[8]) * 256 + int(line[9])) / 10.0
-                    self._devices[deviceId]["state"] = int(line[7])
-                    self._devices[deviceId]["consumption"] = (int(line[10]) * 256 + int(line[11])) / 100.0
-                    self._devices[deviceId]["channel"] = channel
-                    if deviceId in self._known_devices:
-                        _LOGGER.info(f"Skip device with ID {deviceId}, because it's already known.")
-                    else:
-                        _LOGGER.info(f"New device found: {deviceId} (channel {channel}), will wait for another device for {DISCOVERY_TIME} seconds...")
-                        self._known_devices[deviceId] = channel
-                        new_device_ids.append(deviceId)
-                        found = True
-                        start = time.time()
-            except Exception as e:
-                _LOGGER.warning(f"Error parsing device response: {line} - {e}")
-                continue
+                line_stripped = raw_line.strip()
+                if len(line_stripped) < 2:
+                    continue
+                line_stripped = raw_line.strip()
+                if len(line_stripped) < 2:
+                    continue
+                _LOGGER.debug(f"Received line: {line_stripped}")
+                line = line_stripped.split(" ")
+                _LOGGER.debug(f"Parsed line: {line}")
+
+                if len(line) > 12:
+                    while line[0] != "OK" and len(line) >= 12:
+                        line.pop(0)
+                        continue
+
+                if len(line) < 12:
+                    _LOGGER.warning(f"Malformed device response (too short): {line}")
+                    continue
+
+                try:
+                    if line[8] != "170" or line[9] != "170":
+                        deviceId = (
+                            str(line[4]).zfill(3)
+                            + str(line[5]).zfill(3)
+                            + str(line[6]).zfill(3)
+                        )
+                        channel = line[
+                            2
+                        ]  # Channel ist an Position 2 laut PCA301 Protokoll
+                        self._devices[deviceId] = {}
+                        self._devices[deviceId]["power"] = (
+                            int(line[8]) * 256 + int(line[9])
+                        ) / 10.0
+                        self._devices[deviceId]["state"] = int(line[7])
+                        self._devices[deviceId]["consumption"] = (
+                            int(line[10]) * 256 + int(line[11])
+                        ) / 100.0
+                        self._devices[deviceId]["channel"] = channel
+                        if deviceId in self._known_devices:
+                            _LOGGER.info(
+                                f"Skip device with ID {deviceId}, because it's already known."
+                            )
+                        else:
+                            _LOGGER.info(
+                                f"New device found: {deviceId} (channel {channel}), will wait for another device for {DISCOVERY_TIME} seconds..."
+                            )
+                            self._known_devices[deviceId] = channel
+                            new_device_ids.append(deviceId)
+                            found = True
+                            start = time.time()
+                except Exception as e:
+                    _LOGGER.warning(f"Error parsing device response: {line} - {e}")
+                    continue
+
         _LOGGER.info(f"Devices found: {list(self._devices.keys())}")
         self._start_worker()
         return new_device_ids
 
     def _write_cmd(self, cmd):
         _LOGGER.debug(f"Sending command to PCA301: {cmd}")
-        try:
-            # Konvertiere die Bytes zu einem String mit Leerzeichen-Trennung, nur 's' als Suffix (kein Newline)
-            cmd_str = ",".join(str(b) for b in cmd) + "s"
-            _LOGGER.debug(f"Command string to send: {repr(cmd_str)}")
-            self._serial.write(cmd_str.encode('ascii'))
-            _LOGGER.debug(f"Command sent successfully")
-        except Exception as e:
-            _LOGGER.error(f"Error sending command: {e}")
-            return
+        with self._serial_lock:
+            try:
+                # Konvertiere die Bytes zu einem String mit Leerzeichen-Trennung, nur 's' als Suffix (kein Newline)
+                cmd_str = ",".join(str(b) for b in cmd) + "s"
+                _LOGGER.debug(f"Command string to send: {repr(cmd_str)}")
+                self._serial.write(cmd_str.encode("ascii"))
+                _LOGGER.debug(f"Command sent successfully")
+            except Exception as e:
+                _LOGGER.error(f"Error sending command: {e}")
+                return
 
     def _start_worker(self):
         if self._thread is not None:
@@ -272,7 +323,18 @@ class PCA:
             if not self._serial or not self._serial.is_open:
                 _LOGGER.warning("Serial port closed, refresh thread exiting.")
                 break
+
+            # Kurze Pause, um anderen Threads Zugriff zu ermöglichen
+            time.sleep(0.1)
+
+            # Lock für Lesezugriff
+            if not self._serial_lock.acquire(blocking=False):
+                # Lock ist belegt, überspringen und nächsten Durchlauf abwarten
+                continue
+
             try:
+                # Kurzes Timeout für readline, damit Thread nicht ewig blockiert
+                self._serial.timeout = 0.5
                 line = self._serial.readline()
                 try:
                     line = line.encode().decode("utf-8")
@@ -311,6 +373,8 @@ class PCA:
                 break
             except Exception as e:
                 _LOGGER.error(f"Unexpected exception in refresh thread: {e}")
+            finally:
+                self._serial_lock.release()
 
     def notify_new_data(self, hass, device_id):
         """Enable entities for a device when new data is received."""
@@ -344,14 +408,21 @@ class PCA:
 
     def status_request(self, deviceId, timeout=2):
         """Send a status request command to the device and wait for a fresh response."""
-        channel = self._known_devices.get(deviceId, "01")
-        addr1 = int(deviceId[0:3])
-        addr2 = int(deviceId[3:6])
-        addr3 = int(deviceId[6:9])
-        chan = int(channel, 16) if isinstance(channel, str) else int(channel)
-        # Command: [channel, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
-        cmd = [chan, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
-        self._write_cmd(cmd)
+        with self._serial_lock:
+            channel = self._known_devices.get(deviceId, "01")
+            addr1 = int(deviceId[0:3])
+            addr2 = int(deviceId[3:6])
+            addr3 = int(deviceId[6:9])
+            chan = int(channel, 16) if isinstance(channel, str) else int(channel)
+            # Command: [channel, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
+            cmd = [chan, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
+            cmd_str = ",".join(str(b) for b in cmd) + "s"
+            try:
+                self._serial.write(cmd_str.encode("ascii"))
+            except Exception as e:
+                _LOGGER.error(f"Error sending status request: {e}")
+                return False
+
         # Wait for a new value in self._devices[deviceId]["state"]
         start = time.time()
         last_state = self._devices.get(deviceId, {}).get("state")

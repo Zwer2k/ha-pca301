@@ -24,7 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     channel_map = entry.options.get("channels")
     if channel_map:
         _LOGGER.info(f"[PCA301] Lade Channel-Mapping aus entry.options: {channel_map}")
-        pca._known_devices = channel_map.copy()
+        pca.known_devices = channel_map.copy()
     else:
         _LOGGER.info("[PCA301] Kein Channel-Mapping in entry.options gefunden.")
     await pca.async_load_known_devices(hass)
@@ -63,8 +63,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Load existing channel mapping from entry.options
         if config_entry and config_entry.options.get("channels"):
-            pca._known_devices = config_entry.options["channels"].copy()
-            _LOGGER.info(f"Loaded existing channel mapping: {pca._known_devices}")
+            pca.known_devices = config_entry.options["channels"].copy()
+            _LOGGER.info(f"Loaded existing channel mapping: {pca.known_devices}")
 
         hass.async_create_task(
             hass.services.async_call(
@@ -81,10 +81,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_device_ids = await hass.async_add_executor_job(pca.start_scan)
         # Debug log before saving channel mapping
         _LOGGER.debug(
-            f"[PCA301] Vor save_channel_mapping: device={device}, known_devices={pca._known_devices}"
+            f"[PCA301] Vor save_channel_mapping: device={device}, known_devices={pca.known_devices}"
         )
         # After scan: Save channel mapping in entry.options
-        save_channel_mapping(hass, device, pca._known_devices)
+        save_channel_mapping(hass, device, pca.known_devices)
         hass.async_create_task(
             hass.services.async_call(
                 "persistent_notification",
@@ -117,6 +117,39 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pca.close()
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Remove a device from the config entry."""
+    # Extract device_id from device identifiers
+    device_id = None
+    for identifier in device_entry.identifiers:
+        if identifier[0] == DOMAIN:
+            device_id = identifier[1]
+            break
+
+    if not device_id:
+        return True
+
+    # Remove device from known_devices and channel mapping
+    pca = hass.data[DOMAIN].get(config_entry.entry_id)
+    if pca and device_id in pca.known_devices:
+        del pca.known_devices[device_id]
+        _LOGGER.info(f"Removed device {device_id} from known_devices")
+
+    # Update channel mapping in config entry options
+    if device_id in config_entry.options.get("channels", {}):
+        new_options = dict(config_entry.options)
+        new_channels = new_options.get("channels", {}).copy()
+        del new_channels[device_id]
+        new_options["channels"] = new_channels
+        hass.config_entries.async_update_entry(config_entry, options=new_options)
+        _LOGGER.info(f"Removed device {device_id} from channel mapping")
+
+    # Device removal from registry is handled automatically by Home Assistant
+    return True
 
 
 def save_channel_mapping(hass, device, known_devices):

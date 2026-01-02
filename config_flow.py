@@ -214,19 +214,24 @@ class PCA301OptionsFlowHandler(config_entries.OptionsFlow):
         await self.hass.config_entries.async_unload(self._config_entry.entry_id)
         await asyncio.sleep(1)
 
+
         try:
             pca = PCA(self.hass, device)
             # Load existing channel mapping
-            if self._config_entry.options.get("channels"):
-                pca.known_devices = self._config_entry.options["channels"].copy()
+            existing_channels = self._config_entry.options.get("channels", {}).copy()
+            if existing_channels:
+                pca.known_devices = existing_channels.copy()
                 _LOGGER.info(f"Loaded existing channel mapping: {pca.known_devices}")
 
             new_device_ids = await self.hass.async_add_executor_job(pca.start_scan)
             _LOGGER.info(f"Scan complete, found: {new_device_ids}")
 
-            # Update options with new device channels
+            # Merge new channels with existing channels
+            merged_channels = existing_channels.copy()
+            merged_channels.update(pca.known_devices)
+
             new_options = dict(self._config_entry.options)
-            new_options["channels"] = pca.known_devices.copy()
+            new_options["channels"] = merged_channels
 
             self.hass.config_entries.async_update_entry(
                 self._config_entry, options=new_options

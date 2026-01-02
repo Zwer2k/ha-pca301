@@ -38,6 +38,17 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 if ident[0] == "pca301":
                     device_ids.append(ident[1])
 
+    # --- Device Registry: Geräte explizit anlegen (wie UniFi) ---
+    device_registry = dr.async_get(hass)
+    for device_id in device_ids:
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={("pca301", device_id)},
+            manufacturer="ELV",
+            model="PCA301",
+            name=f"PCA301 {device_id}",
+        )
+
     _LOGGER.info(
         f"[PCA301] Gerätezustände in async_setup_entry: _devices={pca._devices}"
     )
@@ -67,6 +78,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Listen for new devices via dispatcher
     async def async_add_new_devices(new_device_ids):
         for device_id in new_device_ids:
+            # Device Registry: auch für neue Geräte anlegen
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={("pca301", device_id)},
+                manufacturer="ELV",
+                model="PCA301",
+                name=f"PCA301 {device_id}",
+            )
             async_add_entities([
                 PowerSensor(hass, pca, pca_lock, device_id),
                 ConsumptionSensor(hass, pca, pca_lock, device_id),

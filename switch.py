@@ -73,6 +73,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     if ident[0] == "pca301":
                         device_ids.append(ident[1])
 
+        # --- Device Registry: Geräte explizit anlegen (wie UniFi) ---
+        from homeassistant.helpers import device_registry as dr
+
+        device_registry = dr.async_get(hass)
+        for device_id in device_ids:
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={("pca301", device_id)},
+                manufacturer="ELV",
+                model="PCA301",
+                name=f"PCA301 {device_id}",
+            )
+
         entities = []
         for device_id in device_ids:
             # Ensure device exists in pca._devices
@@ -98,6 +111,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
         async def async_add_new_devices(new_device_ids):
             for device_id in new_device_ids:
+                # Device Registry: auch für neue Geräte anlegen
+                device_registry.async_get_or_create(
+                    config_entry_id=entry.entry_id,
+                    identifiers={("pca301", device_id)},
+                    manufacturer="ELV",
+                    model="PCA301",
+                    name=f"PCA301 {device_id}",
+                )
                 switch = SmartPlugSwitch(hass, pca, pca_lock, device_id)
                 switch._attr_entity_registry_enabled_default = False
                 async_add_entities([switch])
