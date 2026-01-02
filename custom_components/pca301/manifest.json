@@ -1,7 +1,7 @@
 {
   "domain": "pca301",
   "name": "PCA301",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "codeowners": ["@Zwer2k"],
   "documentation": "https://github.com/Zwer2k/ha-pca301#readme",
   "description": "This integration is derived from and extends the original Home Assistant integration.",
