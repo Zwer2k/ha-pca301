@@ -1,5 +1,10 @@
 
-# PCA301 Home Assistant Integration
+# Home Assistant Integration for ELV PCA301 smart plugs
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![GitHub Release](https://img.shields.io/github/release/Zwer2k/ha-pca301.svg)](https://github.com/Zwer2k/ha-pca301/releases)
+[![License](https://img.shields.io/github/license/Zwer2k/ha-pca301.svg)](LICENSE)
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/Zwer2k/ha-pca301/graphs/commit-activity)
 
 ## Installation via HACS
 1. Go to HACS → Integrations in Home Assistant.
