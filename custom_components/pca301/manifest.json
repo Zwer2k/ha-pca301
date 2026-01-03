@@ -5,8 +5,8 @@
   "config_flow": true,
   "documentation": "https://github.com/Zwer2k/ha-pca301#readme",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Zwer2k/ha-pca301/issues",
   "loggers": ["pypca"],
-  "quality_scale": "silver",
-  "requirements": ["pyserial>=3.5"],
-  "version": "0.1.2"
+  "quality_scale": "bronze",
+  "requirements": ["pyserial>=3.5"]
 }
