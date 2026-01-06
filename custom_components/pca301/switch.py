@@ -165,6 +165,7 @@ class SmartPlugSwitch(SwitchEntity):
             "name": f"PCA301 {self._device_id}",
             "manufacturer": "ELV",
             "model": "PCA301",
+            "pca_id": self._device_id,
         }
 
     @property

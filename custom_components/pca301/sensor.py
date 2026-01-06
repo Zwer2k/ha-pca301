@@ -71,6 +71,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(PowerSensor(hass, pca, pca_lock, device_id, initial_value=power))
         entities.append(ConsumptionSensor(hass, pca, pca_lock, device_id, initial_value=consumption))
         entities.append(ChannelDiagnosticSensor(hass, pca, device_id, initial_value=channel_val))
+        entities.append(UniqueIdDiagnosticSensor(hass, device_id))
+
     async_add_entities(entities)
     for entity in entities:
         entity.async_write_ha_state()
@@ -105,17 +107,19 @@ class ChannelDiagnosticSensor(SensorEntity):
     _attr_native_unit_of_measurement = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
+    _attr_has_entity_name = True
+
     def __init__(self, hass, pca, device_id, initial_value=None):
         self.hass = hass
         self._pca = pca
         self._device_id = device_id
-        self._attr_name = f"PCA301 {device_id} Channel"
+        self._attr_name = "Channel"
         self._attr_unique_id = f"pca301_{device_id}_channel"
         self._attr_device_info = {
-            "identifiers": {("pca301", self._device_id)},
-            "name": f"PCA301 {self._device_id}",
-            "manufacturer": "ELV",
-            "model": "PCA301",
+              "identifiers": {("pca301", self._device_id)},
+              "name": f"PCA301 {self._device_id}",
+              "manufacturer": "ELV",
+              "model": "PCA301",
         }
         self._state = initial_value
         self._available = initial_value is not None
@@ -147,20 +151,56 @@ class ChannelDiagnosticSensor(SensorEntity):
         channel = self._pca._known_devices.get(self._device_id)
         return {"channel": channel}
 
+class UniqueIdDiagnosticSensor(SensorEntity):
+    """Diagnostic sensor exposing the unique_id and registry info for PCA301 device."""
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:identifier"
+    _attr_native_unit_of_measurement = None
+
+    _attr_has_entity_name = True
+
+    def __init__(self, hass, device_id):
+        self.hass = hass
+        self._device_id = device_id
+        self._attr_name = "PCA-ID"
+        self._attr_unique_id = f"pca301_{device_id}_pcaid"
+        self._attr_device_info = {
+            "identifiers": {("pca301", self._device_id)},
+            "name": f"PCA301 {self._device_id}",
+            "manufacturer": "ELV",
+            "model": "PCA301",
+        }
+        self._state = self._device_id
+        self._available = True
+
+    @property
+    def native_value(self):
+        return self._state
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    @property
+    def extra_state_attributes(self):
+        return {}
 
 class PowerSensor(SensorEntity):
     SCAN_INTERVAL = timedelta(seconds=10)
+
+    _attr_has_entity_name = True
 
     def __init__(self, hass, pca, pca_lock, device_id, initial_value=None):
         self.hass = hass
         self._pca = pca
         self._pca_lock = pca_lock
         self._device_id = device_id
-        self._attr_name = f"PCA301 {device_id} Power"
+        self._attr_name = "Power"
         self._attr_native_unit_of_measurement = "W"
         self._attr_device_class = SensorDeviceClass.POWER
         self._attr_state_class = "measurement"
         self._attr_icon = "mdi:flash"
+        self._attr_unique_id = f"pca301_power_{device_id}"
         self._state = initial_value
         self._available = initial_value is not None
 
@@ -202,24 +242,29 @@ class PowerSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        # Channel immer aus _known_devices (persistente Quelle)
         channel = self._pca._known_devices.get(self._device_id)
-        return {"channel": channel}
+        return {
+            "channel": channel,
+            "unique_id": self._attr_unique_id,
+        }
 
 
 class ConsumptionSensor(SensorEntity):
     SCAN_INTERVAL = timedelta(seconds=10)
+
+    _attr_has_entity_name = True
 
     def __init__(self, hass, pca, pca_lock, device_id, initial_value=None):
         self.hass = hass
         self._pca = pca
         self._pca_lock = pca_lock
         self._device_id = device_id
-        self._attr_name = f"PCA301 {device_id} Consumption"
+        self._attr_name = "Consumption"
         self._attr_native_unit_of_measurement = "kWh"
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = "total_increasing"
         self._attr_icon = "mdi:counter"
+        self._attr_unique_id = f"pca301_consumption_{device_id}"
         self._state = initial_value
         self._available = initial_value is not None
 
@@ -266,4 +311,7 @@ class ConsumptionSensor(SensorEntity):
         channel = None
         if self._device_id in self._pca._devices:
             channel = self._pca._devices[self._device_id].get("channel")
-        return {"channel": channel}
+        return {
+            "channel": channel,
+            "unique_id": self._attr_unique_id,
+        }

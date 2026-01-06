@@ -155,6 +155,7 @@ class PCA:
             # Ensure serial port is open
             if not self._serial.is_open:
                 try:
+                    _LOGGER.info(f"Opening serial port for scanning {self._port}")
                     self._serial.port = self._port
                     self._serial.baudrate = self._baud
                     self._serial.timeout = self._timeout
