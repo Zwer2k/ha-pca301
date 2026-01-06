@@ -16,7 +16,11 @@ class PCA301OptionsFlowHandler(OptionsFlow):
         acm_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyACM*")
         serial_ports = usb_ports + acm_ports
         port_options = serial_ports if serial_ports else [DEFAULT_DEVICE]
-        current_device = self.config_entry.data.get(CONF_DEVICE, DEFAULT_DEVICE)
+        # Erst in options, dann in data, dann default
+        current_device = self.config_entry.options.get(
+            CONF_DEVICE,
+            self.config_entry.data.get(CONF_DEVICE, DEFAULT_DEVICE)
+        )
 
         if user_input is not None:
             # Only update if device changed
