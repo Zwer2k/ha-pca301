@@ -9,5 +9,5 @@
   "loggers": ["pypca"],
   "quality_scale": "bronze",
   "requirements": ["pyserial>=3.5"],
-  "version": "0.1.2"
+  "version": "0.2.1"
 }
