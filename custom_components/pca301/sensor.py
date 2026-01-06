@@ -106,7 +106,6 @@ class ChannelDiagnosticSensor(SensorEntity):
     _attr_icon = "mdi:lan"
     _attr_native_unit_of_measurement = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-
     _attr_has_entity_name = True
 
     def __init__(self, hass, pca, device_id, initial_value=None):
@@ -122,7 +121,7 @@ class ChannelDiagnosticSensor(SensorEntity):
               "model": "PCA301",
         }
         self._state = initial_value
-        self._available = initial_value is not None
+        self._available = False
 
     async def async_added_to_hass(self):
         """Call when entity is added to hass."""
@@ -134,6 +133,8 @@ class ChannelDiagnosticSensor(SensorEntity):
             channel = self._pca._known_devices.get(self._device_id)
             self._state = channel
             self._available = channel is not None
+            if self._available:
+                self.async_write_ha_state()
         except Exception:
             self._available = False
 
@@ -156,7 +157,6 @@ class UniqueIdDiagnosticSensor(SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:identifier"
     _attr_native_unit_of_measurement = None
-
     _attr_has_entity_name = True
 
     def __init__(self, hass, device_id):
@@ -171,7 +171,7 @@ class UniqueIdDiagnosticSensor(SensorEntity):
             "model": "PCA301",
         }
         self._state = self._device_id
-        self._available = True
+        self._available = False
 
     @property
     def native_value(self):
@@ -202,7 +202,7 @@ class PowerSensor(SensorEntity):
         self._attr_icon = "mdi:flash"
         self._attr_unique_id = f"pca301_power_{device_id}"
         self._state = initial_value
-        self._available = initial_value is not None
+        self._available = False
 
     async def async_update(self):
         try:
@@ -211,6 +211,7 @@ class PowerSensor(SensorEntity):
                     self._pca.get_current_power, self._device_id
                 )
             self._available = True
+            self.async_write_ha_state()
         except Exception as ex:
             if self._available:
                 _LOGGER.warning("Could not read power for %s: %s", self._device_id, ex)
@@ -266,7 +267,7 @@ class ConsumptionSensor(SensorEntity):
         self._attr_icon = "mdi:counter"
         self._attr_unique_id = f"pca301_consumption_{device_id}"
         self._state = initial_value
-        self._available = initial_value is not None
+        self._available = False
 
     async def async_update(self):
         try:
@@ -275,6 +276,7 @@ class ConsumptionSensor(SensorEntity):
                     self._pca.get_total_consumption, self._device_id
                 )
             self._available = True
+            self.async_write_ha_state()
         except Exception as ex:
             if self._available:
                 _LOGGER.warning(

@@ -63,19 +63,27 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # Get devices from channel mapping in options
         channel_mapping = entry.options.get("channels", {})
         device_ids = list(channel_mapping.keys())
+        _LOGGER.debug(f"[PCA301 Switch] Channel mapping: {channel_mapping}, device_ids from mapping: {device_ids}")
 
         # If no channel mapping, fallback to registry
         if not device_ids:
-            registry_devices = hass.data["pca301"].get(f"{entry.entry_id}_devices", [])
+            from homeassistant.helpers import device_registry as dr
+            device_registry = dr.async_get(hass)
+            registry_devices = [
+                device
+                for device in device_registry.devices.values()
+                if entry.entry_id in device.config_entries
+                and "pca301" in [id[0] for id in device.identifiers]
+            ]
             device_ids = []
             for device in registry_devices:
                 for ident in device.identifiers:
                     if ident[0] == "pca301":
                         device_ids.append(ident[1])
+            _LOGGER.debug(f"[PCA301 Switch] Fallback to registry: {len(registry_devices)} devices found, device_ids: {device_ids}")
 
         # --- Device Registry: Geräte explizit anlegen (wie UniFi) ---
         from homeassistant.helpers import device_registry as dr
-
         device_registry = dr.async_get(hass)
         for device_id in device_ids:
             device_registry.async_get_or_create(
@@ -86,6 +94,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 name=f"PCA301 {device_id}",
             )
 
+        _LOGGER.debug(f"[PCA301 Switch] Device states: _devices={pca._devices}, _known_devices={pca._known_devices}")
         entities = []
         for device_id in device_ids:
             # Ensure device exists in pca._devices
@@ -99,11 +108,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
             device_data = pca._devices.get(device_id, {})
             initial_state = device_data.get("state", None)
+            _LOGGER.debug(f"[PCA301 Switch] Creating switch for device {device_id}: initial_state={initial_state}, device_data={device_data}")
             switch = SmartPlugSwitch(
                 hass, pca, pca_lock, device_id, initial_value=initial_state
             )
-            switch._attr_entity_registry_enabled_default = False
             entities.append(switch)
+        _LOGGER.info(f"[PCA301 Switch] Adding {len(entities)} switch entities")
         async_add_entities(entities)
         # Force state update for initial values
         for entity in entities:
@@ -120,7 +130,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     name=f"PCA301 {device_id}",
                 )
                 switch = SmartPlugSwitch(hass, pca, pca_lock, device_id)
-                switch._attr_entity_registry_enabled_default = False
+                # Switch is now enabled by default
                 async_add_entities([switch])
 
         async_dispatcher_connect(
@@ -135,43 +145,31 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class SmartPlugSwitch(SwitchEntity):
-    SCAN_INTERVAL = timedelta(seconds=10)
-
     """Representation of a PCA Smart Plug switch."""
+
+    SCAN_INTERVAL = timedelta(seconds=10)
 
     def __init__(self, hass, pca, pca_lock, device_id, initial_value=None):
         """Initialize the switch."""
         self.hass = hass
         self._device_id = device_id
-        self._name = f"PCA301 {device_id} Switch"
+        self._attr_name = "Switch"
         self._state = initial_value
-        self._available = initial_value is not None
+        self._available = False
         self._pca = pca
         self._pca_lock = pca_lock
         self._attr_icon = "mdi:power"
-
-    async def async_added_to_hass(self):
-        """Call when entity is added to hass."""
-        self.async_write_ha_state()
-
-    @property
-    def unique_id(self):
-        return f"pca301_switch_{self._device_id}"
-
-    @property
-    def device_info(self):
-        return {
+        self._attr_unique_id = f"pca301_{device_id}_switch"
+        self._attr_device_info = {
             "identifiers": {("pca301", self._device_id)},
             "name": f"PCA301 {self._device_id}",
             "manufacturer": "ELV",
             "model": "PCA301",
-            "pca_id": self._device_id,
         }
 
-    @property
-    def name(self):
-        """Return the name of the Smart Plug, if any."""
-        return self._name
+    async def async_added_to_hass(self):
+        """Call when entity is added to hass."""
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
@@ -219,6 +217,7 @@ class SmartPlugSwitch(SwitchEntity):
             async with self._pca_lock:
                 self._state = await self.hass.async_add_executor_job(self._pca.get_state, self._device_id)
             self._available = True
+            self.async_write_ha_state()
         except OSError as ex:
             if self._available:
                 _LOGGER.warning("Could not read state for %s: %s", self.name, ex)
