@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 
+
 from homeassistant import config_entries
 from homeassistant.const import CONF_DEVICE
 from homeassistant.core import callback
@@ -23,6 +24,7 @@ from homeassistant.helpers.translation import async_get_cached_translations
 
 from .const import DOMAIN, DEFAULT_DEVICE
 from .pypca import PCA
+from .options_flow import PCA301OptionsFlowHandler
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +47,12 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> dict[str, type[ConfigSubentryFlow]]:
         """Return subentries supported by this handler."""
         return {"scan_device": PCA301ScanDeviceFlowHandler}
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry):
+        """Get the options flow handler for PCA301."""
+        return PCA301OptionsFlowHandler()
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step of the config flow."""
