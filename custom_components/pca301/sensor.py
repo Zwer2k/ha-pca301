@@ -121,30 +121,14 @@ class ChannelDiagnosticSensor(SensorEntity):
               "model": "PCA301",
         }
         self._state = initial_value
-        self._available = False
 
     async def async_added_to_hass(self):
         """Call when entity is added to hass."""
         self.async_write_ha_state()
 
-    async def async_update(self):
-        try:
-            # Channel direkt aus _known_devices (persistente Quelle)
-            channel = self._pca._known_devices.get(self._device_id)
-            self._state = channel
-            self._available = channel is not None
-            if self._available:
-                self.async_write_ha_state()
-        except Exception:
-            self._available = False
-
     @property
     def native_value(self):
         return self._state
-
-    @property
-    def available(self) -> bool:
-        return self._available
 
     @property
     def extra_state_attributes(self):
@@ -171,15 +155,10 @@ class UniqueIdDiagnosticSensor(SensorEntity):
             "model": "PCA301",
         }
         self._state = self._device_id
-        self._available = False
 
     @property
     def native_value(self):
         return self._state
-
-    @property
-    def available(self) -> bool:
-        return self._available
 
     @property
     def extra_state_attributes(self):

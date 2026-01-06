@@ -114,7 +114,7 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.info(
                 f"[PCA301] entry_to_reload.state vor Unload: {entry_to_reload.state}"
             )
-        if entry_to_reload and entry_to_reload.state == entry_to_reload.State.LOADED:
+        if entry_to_reload and entry_to_reload.state == ConfigEntryState.LOADED:
             _LOGGER.info(
                 f"[PCA301] Unloading integration for port {device} before scan..."
             )
@@ -157,7 +157,7 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Nach Fehler Integration ggf. wieder laden
             if (
                 entry_to_reload
-                and entry_to_reload.state == entry_to_reload.State.NOT_LOADED
+                and entry_to_reload.state == ConfigEntryState.NOT_LOADED
             ):
                 await self.hass.config_entries.async_setup(entry_to_reload.entry_id)
             return self.async_show_form(
@@ -168,7 +168,7 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Nach Scan Integration wieder laden
         if (
             entry_to_reload
-            and entry_to_reload.state == entry_to_reload.State.NOT_LOADED
+            and entry_to_reload.state == ConfigEntryState.NOT_LOADED
         ):
             _LOGGER.info(
                 f"[PCA301] entry_to_reload.state vor Reload: {entry_to_reload.state}"
