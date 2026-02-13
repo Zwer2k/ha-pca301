@@ -18,7 +18,6 @@ from homeassistant.config_entries import (
 from homeassistant import config_entries
 from homeassistant.const import CONF_DEVICE
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import progress_step
 from homeassistant.helpers.selector import TextSelector
 from homeassistant.helpers.translation import async_get_cached_translations
 
@@ -91,9 +90,8 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             last_step=False,
         )
 
-    @progress_step()
     async def async_step_scan(self, user_input=None):
-        """Show sandglass and start scan in background using progress_step decorator."""
+        """Show sandglass and start scan in background (no progress_step decorator)."""
         device = getattr(self, "_selected_device", None)
         if device is None:
             return self.async_show_form(
@@ -190,7 +188,7 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    # The scan_for_new_devices step is not needed with progress_step pattern and can be removed.
+    # The scan_for_new_devices step is now needed again since progress_step is not used.
 
 
 class PCA301ScanDeviceFlowHandler(ConfigSubentryFlow):
@@ -215,11 +213,10 @@ class PCA301ScanDeviceFlowHandler(ConfigSubentryFlow):
             last_step=False,
         )
 
-    @progress_step()
     async def async_step_scan_for_new_devices(
         self, user_input: dict | None = None
     ) -> SubentryFlowResult:
-        """Scan and show device list directly after scan."""
+        """Scan and show device list directly after scan (no progress_step decorator)."""
         # Get parent config entry using _get_entry()
         config_entry = self._get_entry()
 
