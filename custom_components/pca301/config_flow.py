@@ -57,9 +57,12 @@ class PCA301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step of the config flow."""
         errors = {}
         hass = self.hass
+        # Persistente /dev/serial/by-id Pfade bevorzugen
+        byid_ports = await hass.async_add_executor_job(glob.glob, "/dev/serial/by-id/*")
         usb_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyUSB*")
         acm_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyACM*")
-        serial_ports = usb_ports + acm_ports
+        # by-id zuerst, dann ttyUSB, dann ttyACM — und Duplikate entfernen
+        serial_ports = list(dict.fromkeys(byid_ports + usb_ports + acm_ports))
         port_options = serial_ports if serial_ports else [DEFAULT_DEVICE]
 
         if user_input is not None:

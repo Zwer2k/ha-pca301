@@ -17,9 +17,12 @@ class PCA301OptionsFlowHandler(OptionsFlow):
         """Manage the options for the serial device."""
         hass = self.hass
         errors = {}
+        # Persistente /dev/serial/by-id Pfade bevorzugen
+        byid_ports = await hass.async_add_executor_job(glob.glob, "/dev/serial/by-id/*")
         usb_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyUSB*")
         acm_ports = await hass.async_add_executor_job(glob.glob, "/dev/ttyACM*")
-        serial_ports = usb_ports + acm_ports
+        # by-id zuerst, dann ttyUSB, dann ttyACM — und Duplikate entfernen
+        serial_ports = list(dict.fromkeys(byid_ports + usb_ports + acm_ports))
         port_options = serial_ports if serial_ports else [DEFAULT_DEVICE]
         # Erst in options, dann in data, dann default
         current_device = self.config_entry.options.get(
