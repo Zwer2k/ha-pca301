@@ -36,5 +36,20 @@
         }
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PCA301 Options",
+        "description": "Configure serial port"
+      },
+      "device_options": {
+        "title": "Device Options",
+        "description": "Configure options for each PCA301 device ({device_count} devices found)"
+      }
+    },
+    "error": {
+      "no_devices": "No PCA301 devices found. Please run a scan first."
+    }
   }
 }

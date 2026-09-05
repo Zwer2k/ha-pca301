@@ -2,7 +2,12 @@ from homeassistant.config_entries import OptionsFlow
 from homeassistant.const import CONF_DEVICE
 import voluptuous as vol
 import glob
-from .const import DEFAULT_DEVICE
+from .const import (
+    DEFAULT_DEVICE,
+    CONF_ALWAYS_POWER_ON,
+    CONF_AUTO_ON_DELAY,
+    DEFAULT_AUTO_ON_DELAY,
+)
 
 
 class PCA301OptionsFlowHandler(OptionsFlow):
@@ -26,7 +31,7 @@ class PCA301OptionsFlowHandler(OptionsFlow):
             # Only update if device changed
             if user_input[CONF_DEVICE] != current_device:
                 return self.async_create_entry(data={CONF_DEVICE: user_input[CONF_DEVICE]})
-            return self.async_create_entry(data={})
+            return await self.async_step_device_options()
 
         return self.async_show_form(
             step_id="init",
@@ -34,4 +39,58 @@ class PCA301OptionsFlowHandler(OptionsFlow):
                 vol.Required(CONF_DEVICE, default=current_device): vol.In(port_options)
             }),
             errors=errors,
+        )
+
+    async def async_step_device_options(self, user_input=None):
+        """Configure device-specific options (Always Power On)."""
+        channels = self.config_entry.options.get("channels", {})
+        device_ids = list(channels.keys())
+
+        if not device_ids:
+            return self.async_show_form(
+                step_id="device_options",
+                data_schema=vol.Schema({}),
+                errors={"base": "no_devices"},
+            )
+
+        # Für jedes Gerät eine eigene Sektion mit Optionen
+        schema = {}
+        for device_id in device_ids:
+            current_config = channels.get(device_id, {})
+            if not isinstance(current_config, dict):
+                current_config = {}
+
+            key_prefix = f"{device_id}_"
+            schema[vol.Required(
+                f"{key_prefix}{CONF_ALWAYS_POWER_ON}",
+                default=current_config.get(CONF_ALWAYS_POWER_ON, False)
+            )] = bool
+            schema[vol.Optional(
+                f"{key_prefix}{CONF_AUTO_ON_DELAY}",
+                default=current_config.get(CONF_AUTO_ON_DELAY, DEFAULT_AUTO_ON_DELAY)
+            )] = vol.All(vol.Coerce(int), vol.Range(min=1, max=60))
+
+        if user_input is not None:
+            # Neue Optionen speichern
+            new_options = dict(self.config_entry.options)
+            new_channels = {}
+
+            for device_id in device_ids:
+                key_prefix = f"{device_id}_"
+                new_channels[device_id] = {
+                    CONF_ALWAYS_POWER_ON: user_input.get(
+                        f"{key_prefix}{CONF_ALWAYS_POWER_ON}", False
+                    ),
+                    CONF_AUTO_ON_DELAY: user_input.get(
+                        f"{key_prefix}{CONF_AUTO_ON_DELAY}", DEFAULT_AUTO_ON_DELAY
+                    ),
+                }
+
+            new_options["channels"] = new_channels
+            return self.async_create_entry(data=new_options)
+
+        return self.async_show_form(
+            step_id="device_options",
+            data_schema=vol.Schema(schema),
+            description_placeholders={"device_count": str(len(device_ids))},
         )

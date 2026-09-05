@@ -17,9 +17,11 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from typing import Any
+from datetime import datetime
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import pypca
+from .const import CONF_ALWAYS_POWER_ON, CONF_AUTO_ON_DELAY, DEFAULT_AUTO_ON_DELAY
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -110,7 +112,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             initial_state = device_data.get("state", None)
             _LOGGER.debug(f"[PCA301 Switch] Creating switch for device {device_id}: initial_state={initial_state}, device_data={device_data}")
             switch = SmartPlugSwitch(
-                hass, pca, pca_lock, device_id, initial_value=initial_state
+                hass, pca, pca_lock, device_id, initial_value=initial_state,
+                entry_options=entry.options
             )
             entities.append(switch)
         _LOGGER.info(f"[PCA301 Switch] Adding {len(entities)} switch entities")
@@ -129,7 +132,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     model="PCA301",
                     name=f"PCA301 {device_id}",
                 )
-                switch = SmartPlugSwitch(hass, pca, pca_lock, device_id)
+                switch = SmartPlugSwitch(
+                    hass, pca, pca_lock, device_id, entry_options=entry.options
+                )
                 # Switch is now enabled by default
                 async_add_entities([switch])
 
@@ -149,7 +154,8 @@ class SmartPlugSwitch(SwitchEntity):
 
     SCAN_INTERVAL = timedelta(seconds=10)
 
-    def __init__(self, hass, pca, pca_lock, device_id, initial_value=None):
+    def __init__(self, hass, pca, pca_lock, device_id, initial_value=None,
+                 entry_options=None):
         """Initialize the switch."""
         self.hass = hass
         self._device_id = device_id
@@ -166,10 +172,21 @@ class SmartPlugSwitch(SwitchEntity):
             "manufacturer": "ELV",
             "model": "PCA301",
         }
+        self._entry_options = entry_options or {}
+        self._last_manual_off: datetime | None = None
+        self._auto_on_pending = False
+        self._auto_on_task = None
 
     async def async_added_to_hass(self):
         """Call when entity is added to hass."""
         self.async_write_ha_state()
+        # Nach dem Hinzufügen sofort prüfen, ob Always Power On nötig ist
+        await self._check_always_power_on()
+
+    async def async_will_remove_from_hass(self):
+        """Cleanup when entity is removed."""
+        if self._auto_on_task and not self._auto_on_task.done():
+            self._auto_on_task.cancel()
 
     @property
     def available(self) -> bool:
@@ -181,6 +198,72 @@ class SmartPlugSwitch(SwitchEntity):
         """Return true if switch is on."""
         return bool(self._state)
 
+    def _get_device_config(self) -> dict:
+        """Get device-specific configuration from options."""
+        channels = self._entry_options.get("channels", {})
+        config = channels.get(self._device_id, {})
+        if not isinstance(config, dict):
+            return {}
+        return config
+
+    @property
+    def _always_power_on(self) -> bool:
+        """Check if Always Power On is enabled for this device."""
+        return self._get_device_config().get(CONF_ALWAYS_POWER_ON, False)
+
+    def _get_auto_on_delay(self) -> int:
+        """Get configured delay or default."""
+        return self._get_device_config().get(CONF_AUTO_ON_DELAY, DEFAULT_AUTO_ON_DELAY)
+
+    def _was_recently_manually_off(self) -> bool:
+        """Check if switch was recently turned off manually (30s protection)."""
+        if self._last_manual_off is None:
+            return False
+        return (datetime.now() - self._last_manual_off).total_seconds() < 30
+
+    async def _check_always_power_on(self):
+        """Check if Always Power On needs to trigger after state update."""
+        if not self._always_power_on:
+            return
+        if self._state != 0:  # Not OFF
+            return
+        if self._was_recently_manually_off():
+            _LOGGER.debug(
+                "Always Power On: %s was manually turned off recently, skipping",
+                self._device_id
+            )
+            return
+        if self._auto_on_pending:
+            return
+
+        _LOGGER.info(
+            "Always Power On: Scheduling turn-on for %s in %ds",
+            self._device_id,
+            self._get_auto_on_delay()
+        )
+        await self._schedule_auto_on()
+
+    async def _schedule_auto_on(self):
+        """Schedule automatic turn-on with delay."""
+        if self._auto_on_pending:
+            return
+        self._auto_on_pending = True
+        delay = self._get_auto_on_delay()
+
+        async def _delayed_turn_on():
+            await asyncio.sleep(delay)
+            # Prüfen ob immer noch OFF und nicht manuell ausgeschaltet wurde
+            if self._state == 0 and not self._was_recently_manually_off():
+                _LOGGER.info(
+                    "Always Power On: Turning %s back ON after %ds delay",
+                    self._device_id,
+                    delay
+                )
+                await self.async_turn_on()
+            self._auto_on_pending = False
+
+        self._auto_on_task = self.hass.async_create_task(_delayed_turn_on())
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         try:
@@ -189,6 +272,7 @@ class SmartPlugSwitch(SwitchEntity):
                 await self.hass.async_add_executor_job(self._pca.turn_on, self._device_id)
             self._state = True
             self._available = True
+            self._last_manual_off = None  # Reset manual-off marker
             self.async_write_ha_state()
             _LOGGER.info(f"PCA301 device {self._device_id} turned on successfully")
         except Exception as ex:
@@ -197,13 +281,14 @@ class SmartPlugSwitch(SwitchEntity):
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the switch off."""
+        """Turn the switch off - mark as manual."""
         try:
             _LOGGER.info(f"Turning off PCA301 device {self._device_id}")
             async with self._pca_lock:
                 await self.hass.async_add_executor_job(self._pca.turn_off, self._device_id)
             self._state = False
             self._available = True
+            self._last_manual_off = datetime.now()  # Mark as manual
             self.async_write_ha_state()
             _LOGGER.info(f"PCA301 device {self._device_id} turned off successfully")
         except Exception as ex:
@@ -212,11 +297,21 @@ class SmartPlugSwitch(SwitchEntity):
             self.async_write_ha_state()
 
     async def async_update(self) -> None:
-        """Update the PCA switch's state."""
+        """Update the PCA switch's state and handle Always Power On."""
         try:
             async with self._pca_lock:
-                self._state = await self.hass.async_add_executor_job(self._pca.get_state, self._device_id)
+                new_state = await self.hass.async_add_executor_job(
+                    self._pca.get_state, self._device_id
+                )
+
+            old_state = self._state
+            self._state = new_state
             self._available = True
+
+            # Always Power On: Prüfen wenn Zustand auf OFF wechselt
+            if new_state is not None and new_state == 0 and old_state != 0:
+                await self._check_always_power_on()
+
             self.async_write_ha_state()
         except OSError as ex:
             if self._available:

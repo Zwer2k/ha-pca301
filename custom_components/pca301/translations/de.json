@@ -35,5 +35,20 @@
         }
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PCA301 Optionen",
+        "description": "Seriellen Port konfigurieren"
+      },
+      "device_options": {
+        "title": "Geräte-Optionen",
+        "description": "Konfigurieren Sie die Optionen für jedes PCA301-Gerät ({device_count} Geräte gefunden)"
+      }
+    },
+    "error": {
+      "no_devices": "Keine PCA301-Geräte gefunden. Bitte führen Sie zuerst einen Scan durch."
+    }
   }
 }
