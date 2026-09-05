@@ -42,6 +42,8 @@ class PCA:
         self._serial = serial.Serial(timeout=timeout)
         self._known_devices = {}  # deviceId: channel
         self._serial_lock = threading.Lock()  # Lock für serielle Schnittstelle
+        self._last_seen = {}  # deviceId -> timestamp of last received message
+        self._availability_timeout = 60  # seconds
 
     async def async_load_known_devices(self, hass):
         # No-op: Devices will be loaded from the Home Assistant device registry or entry.options.
@@ -121,6 +123,13 @@ class PCA:
                     "channel": channel,
                 }
         return self._devices
+
+    def is_device_available(self, deviceId) -> bool:
+        """Check if device has communicated within the availability timeout."""
+        last = self._last_seen.get(deviceId)
+        if last is None:
+            return False
+        return (time.time() - last) < self._availability_timeout
 
     def get_current_power(self, deviceId):
         return self._devices[deviceId]["power"]
@@ -259,6 +268,7 @@ class PCA:
                             int(line[10]) * 256 + int(line[11])
                         ) / 100.0
                         self._devices[deviceId]["channel"] = channel
+                        self._last_seen[deviceId] = time.time()
                         if deviceId in self._known_devices:
                             _LOGGER.info(
                                 f"Skip device with ID {deviceId}, because it's already known."
@@ -379,6 +389,7 @@ class PCA:
                     self._devices[deviceId]["consumption"] = (
                         int(line[10]) * 256 + int(line[11])
                     ) / 100.0
+                    self._last_seen[deviceId] = time.time()
                     # Notify Home Assistant to enable entities for this device
                     if hasattr(self, "_hass") and self._hass:
                         self.notify_new_data(self._hass, deviceId)

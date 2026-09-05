@@ -7,6 +7,8 @@ from .const import (
     CONF_ALWAYS_POWER_ON,
     CONF_AUTO_ON_DELAY,
     DEFAULT_AUTO_ON_DELAY,
+    CONF_AVAILABILITY_TIMEOUT,
+    DEFAULT_AVAILABILITY_TIMEOUT,
 )
 
 
@@ -45,7 +47,7 @@ class PCA301OptionsFlowHandler(OptionsFlow):
         )
 
     async def async_step_device_options(self, user_input=None):
-        """Configure device-specific options (Always Power On)."""
+        """Configure device-specific options (Always Power On, Availability)."""
         channels = self.config_entry.options.get("channels", {})
         device_ids = list(channels.keys())
 
@@ -72,6 +74,10 @@ class PCA301OptionsFlowHandler(OptionsFlow):
                 f"{key_prefix}{CONF_AUTO_ON_DELAY}",
                 default=current_config.get(CONF_AUTO_ON_DELAY, DEFAULT_AUTO_ON_DELAY)
             )] = vol.All(vol.Coerce(int), vol.Range(min=1, max=60))
+            schema[vol.Optional(
+                f"{key_prefix}{CONF_AVAILABILITY_TIMEOUT}",
+                default=current_config.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT)
+            )] = vol.All(vol.Coerce(int), vol.Range(min=10, max=300))
 
         if user_input is not None:
             # Neue Optionen speichern
@@ -86,6 +92,9 @@ class PCA301OptionsFlowHandler(OptionsFlow):
                     ),
                     CONF_AUTO_ON_DELAY: user_input.get(
                         f"{key_prefix}{CONF_AUTO_ON_DELAY}", DEFAULT_AUTO_ON_DELAY
+                    ),
+                    CONF_AVAILABILITY_TIMEOUT: user_input.get(
+                        f"{key_prefix}{CONF_AVAILABILITY_TIMEOUT}", DEFAULT_AVAILABILITY_TIMEOUT
                     ),
                 }
 

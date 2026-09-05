@@ -30,6 +30,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await pca.async_load_known_devices(hass)
     # Store hass reference for entity enabling
     pca.open()
+    # Set availability timeout from options
+    availability_timeout = entry.options.get("availability_timeout", 60)
+    pca._availability_timeout = availability_timeout
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = pca
 
     device_registry = dr.async_get(hass)

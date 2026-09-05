@@ -189,7 +189,7 @@ class PowerSensor(SensorEntity):
                 self._state = await self.hass.async_add_executor_job(
                     self._pca.get_current_power, self._device_id
                 )
-            self._available = True
+                self._available = self._pca.is_device_available(self._device_id)
             self.async_write_ha_state()
         except Exception as ex:
             if self._available:
@@ -254,7 +254,7 @@ class ConsumptionSensor(SensorEntity):
                 self._state = await self.hass.async_add_executor_job(
                     self._pca.get_total_consumption, self._device_id
                 )
-            self._available = True
+                self._available = self._pca.is_device_available(self._device_id)
             self.async_write_ha_state()
         except Exception as ex:
             if self._available:

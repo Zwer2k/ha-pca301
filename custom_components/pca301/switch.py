@@ -227,6 +227,8 @@ class SmartPlugSwitch(SwitchEntity):
             return
         if self._state != 0:  # Not OFF
             return
+        if not self._available:  # Device not reachable
+            return
         if self._was_recently_manually_off():
             _LOGGER.debug(
                 "Always Power On: %s was manually turned off recently, skipping",
@@ -303,13 +305,19 @@ class SmartPlugSwitch(SwitchEntity):
                 new_state = await self.hass.async_add_executor_job(
                     self._pca.get_state, self._device_id
                 )
+                device_available = self._pca.is_device_available(self._device_id)
 
             old_state = self._state
             self._state = new_state
-            self._available = True
+            self._available = device_available
 
-            # Always Power On: Prüfen wenn Zustand auf OFF wechselt
-            if new_state is not None and new_state == 0 and old_state != 0:
+            # Always Power On: Prüfen wenn Zustand auf OFF wechselt und Gerät verfügbar
+            if (
+                new_state is not None
+                and new_state == 0
+                and old_state != 0
+                and device_available
+            ):
                 await self._check_always_power_on()
 
             self.async_write_ha_state()
