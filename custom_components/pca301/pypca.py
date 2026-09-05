@@ -171,6 +171,18 @@ class PCA:
             except Exception as e:
                 _LOGGER.warning(f"Could not flush buffers: {e}")
 
+            # Der JeeLink sendet nach dem Öffnen/Reset ggf. seinen Help-Text
+            # (Willkommensnachricht). Diese Zeilen kurz auslesen und verwerfen,
+            # damit sie nicht als PCA301-Antworten geparst werden.
+            try:
+                old_timeout = self._serial.timeout
+                self._serial.timeout = 0.5
+                while self._serial.readline():
+                    pass
+                self._serial.timeout = old_timeout
+            except Exception as e:
+                _LOGGER.warning(f"Could not drain initial JeeLink output: {e}")
+
             start = int(time.time())
             found = False
             DISCOVERY_TIME = 5 if fast else 15
@@ -209,12 +221,15 @@ class PCA:
                 line_stripped = raw_line.strip()
                 if len(line_stripped) < 2:
                     continue
-                line_stripped = raw_line.strip()
-                if len(line_stripped) < 2:
-                    continue
                 _LOGGER.debug(f"Received line: {line_stripped}")
                 line = line_stripped.split(" ")
                 _LOGGER.debug(f"Parsed line: {line}")
+
+                # Nur PCA301-Antworten (OK ...) verarbeiten; andere Zeilen
+                # (z.B. JeeLink Help-Text oder TX-Meldungen) ignorieren
+                if line[0] != "OK":
+                    _LOGGER.debug(f"Ignoring non-device line: {line_stripped}")
+                    continue
 
                 if len(line) > 12:
                     while line[0] != "OK" and len(line) >= 12:
