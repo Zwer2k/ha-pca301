@@ -291,7 +291,7 @@ class PCA:
         addr1 = int(deviceId[0:3])
         addr2 = int(deviceId[3:6])
         addr3 = int(deviceId[6:9])
-        chan = int(channel, 16) if isinstance(channel, str) else int(channel)
+        chan = int(channel)
         cmd = [chan, 5, addr1, addr2, addr3, 0, 255, 255, 255, 255]
         _LOGGER.info(f"Turning OFF PCA301 device {deviceId} channel {channel} with command: {cmd}")
         self._write_cmd(cmd)
@@ -308,7 +308,7 @@ class PCA:
         addr1 = int(deviceId[0:3])
         addr2 = int(deviceId[3:6])
         addr3 = int(deviceId[6:9])
-        chan = int(channel, 16) if isinstance(channel, str) else int(channel)
+        chan = int(channel)
         cmd = [chan, 5, addr1, addr2, addr3, 1, 255, 255, 255, 255]
         _LOGGER.info(f"Turning ON PCA301 device {deviceId} channel {channel} with command: {cmd}")
         self._write_cmd(cmd)
@@ -414,7 +414,7 @@ class PCA:
             addr1 = int(deviceId[0:3])
             addr2 = int(deviceId[3:6])
             addr3 = int(deviceId[6:9])
-            chan = int(channel, 16) if isinstance(channel, str) else int(channel)
+            chan = int(channel)
             # Command: [channel, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
             cmd = [chan, 4, addr1, addr2, addr3, 0, 255, 255, 255, 255]
             cmd_str = ",".join(str(b) for b in cmd) + "s"
