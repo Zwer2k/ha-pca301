@@ -8,4 +8,4 @@ DEFAULT_AUTO_ON_DELAY = 5  # seconds
 
 # Availability timeout
 CONF_AVAILABILITY_TIMEOUT = "availability_timeout"
-DEFAULT_AVAILABILITY_TIMEOUT = 60  # seconds
+DEFAULT_AVAILABILITY_TIMEOUT = 120  # seconds
