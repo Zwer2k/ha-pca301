@@ -41,6 +41,29 @@ To add more PCA301 plugs later, use the new **Subentry Flow**:
 ## Supported Entities
 - Switch: On/Off control for each plug
 - Sensor: Power (W), Consumption (kWh), Channel (diagnostic)
+- Switch: Always Power On (per-device setting, visible in device controls)
+- Number: Auto On Delay (1-60s, per-device setting, visible in device controls)
+- Number: Availability Timeout (10-600s, per-device setting, hidden by default)
+
+## Features
+
+### Always Power On
+Each PCA301 device can be configured to automatically turn back ON when it reports OFF:
+- Enable the **Always Power On** switch in the device controls
+- Configure the **Auto On Delay** (default: 5 seconds)
+- The device will automatically turn back on after the delay if it reports OFF and was not manually turned off
+
+### Availability Timeout
+The integration tracks when each device was last seen:
+- If no message is received within the timeout, the entity becomes **unavailable**
+- This prevents stale states when a device loses power
+- The timeout is configurable per device (default: 120 seconds)
+- The **Availability Timeout** number entity is hidden by default and can be enabled manually if needed
+
+### Persistent Serial Paths
+The integration supports persistent serial device paths:
+- `/dev/serial/by-id/*` paths are preferred over `/dev/ttyUSB*` or `/dev/ttyACM*`
+- This prevents issues when USB device numbers change after reboots or replugging
 
 ## Limitations
 - Only PCA301 devices are supported
