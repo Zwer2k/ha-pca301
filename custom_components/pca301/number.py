@@ -73,6 +73,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 default=DEFAULT_AVAILABILITY_TIMEOUT,
                 unit="s",
                 icon="mdi:lan-disconnect",
+                enabled_by_default=False,
             )
         )
 
@@ -100,6 +101,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                         min_value=10, max_value=300,
                         default=DEFAULT_AVAILABILITY_TIMEOUT,
                         unit="s", icon="mdi:lan-disconnect",
+                        enabled_by_default=False,
                     ),
                 ]
             )
@@ -117,6 +119,7 @@ class PCA301Number(NumberEntity):
 
     _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
+    _attr_entity_registry_enabled_default = True
 
     def __init__(
         self,
@@ -133,6 +136,7 @@ class PCA301Number(NumberEntity):
         default,
         unit,
         icon,
+        enabled_by_default=True,
     ):
         """Initialize the number entity."""
         self.hass = hass
@@ -148,6 +152,7 @@ class PCA301Number(NumberEntity):
         self._attr_native_step = 1
         self._attr_native_unit_of_measurement = unit
         self._attr_icon = icon
+        self._attr_entity_registry_enabled_default = enabled_by_default
         self._attr_device_info = {
             "identifiers": {("pca301", device_id)},
         }
