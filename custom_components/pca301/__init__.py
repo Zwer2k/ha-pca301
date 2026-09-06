@@ -12,7 +12,7 @@ from homeassistant.helpers import device_registry as dr
 from .pypca import PCA
 
 DOMAIN = "pca301"
-PLATFORMS = [Platform.SWITCH, Platform.SENSOR]
+PLATFORMS = [Platform.SWITCH, Platform.SENSOR, Platform.NUMBER]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -30,9 +30,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await pca.async_load_known_devices(hass)
     # Store hass reference for entity enabling
     pca.open()
-    # Set availability timeout from options
-    availability_timeout = entry.options.get("availability_timeout", 60)
-    pca._availability_timeout = availability_timeout
+    # Lade persistierte Laufzeit-Konfiguration (Always On, Delays, Timeout)
+    pca._device_config = entry.options.get("device_config", {}).copy()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = pca
 
     device_registry = dr.async_get(hass)

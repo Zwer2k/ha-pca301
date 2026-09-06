@@ -112,10 +112,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
             initial_state = device_data.get("state", None)
             _LOGGER.debug(f"[PCA301 Switch] Creating switch for device {device_id}: initial_state={initial_state}, device_data={device_data}")
             switch = SmartPlugSwitch(
-                hass, pca, pca_lock, device_id, initial_value=initial_state,
-                entry_options=entry.options
+                hass, pca, pca_lock, entry, device_id, initial_value=initial_state
             )
             entities.append(switch)
+            # Always Power On als separate Control-Entity (erscheint im Gerät)
+            entities.append(
+                AlwaysPowerOnSwitch(hass, pca, entry, device_id)
+            )
         _LOGGER.info(f"[PCA301 Switch] Adding {len(entities)} switch entities")
         async_add_entities(entities)
         # Force state update for initial values
@@ -132,11 +135,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     model="PCA301",
                     name=f"PCA301 {device_id}",
                 )
-                switch = SmartPlugSwitch(
-                    hass, pca, pca_lock, device_id, entry_options=entry.options
-                )
-                # Switch is now enabled by default
-                async_add_entities([switch])
+                switch = SmartPlugSwitch(hass, pca, pca_lock, entry, device_id)
+                async_add_entities([
+                    switch,
+                    AlwaysPowerOnSwitch(hass, pca, entry, device_id),
+                ])
 
         async_dispatcher_connect(
             hass,
@@ -154,10 +157,10 @@ class SmartPlugSwitch(SwitchEntity):
 
     SCAN_INTERVAL = timedelta(seconds=10)
 
-    def __init__(self, hass, pca, pca_lock, device_id, initial_value=None,
-                 entry_options=None):
+    def __init__(self, hass, pca, pca_lock, entry, device_id, initial_value=None):
         """Initialize the switch."""
         self.hass = hass
+        self._entry = entry
         self._device_id = device_id
         self._attr_name = "Switch"
         self._state = initial_value
@@ -172,7 +175,6 @@ class SmartPlugSwitch(SwitchEntity):
             "manufacturer": "ELV",
             "model": "PCA301",
         }
-        self._entry_options = entry_options or {}
         self._last_manual_off: datetime | None = None
         self._auto_on_pending = False
         self._auto_on_task = None
@@ -199,12 +201,8 @@ class SmartPlugSwitch(SwitchEntity):
         return bool(self._state)
 
     def _get_device_config(self) -> dict:
-        """Get device-specific configuration from options."""
-        channels = self._entry_options.get("channels", {})
-        config = channels.get(self._device_id, {})
-        if not isinstance(config, dict):
-            return {}
-        return config
+        """Laufzeit-Konfiguration für dieses Gerät aus der PCA-Instanz."""
+        return self._pca._device_config.get(self._device_id, {})
 
     @property
     def _always_power_on(self) -> bool:
@@ -325,3 +323,56 @@ class SmartPlugSwitch(SwitchEntity):
             if self._available:
                 _LOGGER.warning("Could not read state for %s: %s", self.name, ex)
                 self._available = False
+
+
+class AlwaysPowerOnSwitch(SwitchEntity):
+    """Config-Schalter für Always Power On (erscheint im Gerät unter Controls)."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:power-plug"
+
+    def __init__(self, hass, pca, entry, device_id):
+        """Initialize the config switch."""
+        self.hass = hass
+        self._pca = pca
+        self._entry = entry
+        self._device_id = device_id
+        self._attr_name = "Always Power On"
+        self._attr_unique_id = f"pca301_{device_id}_always_power_on"
+        self._attr_device_info = {
+            "identifiers": {("pca301", device_id)},
+        }
+
+    @property
+    def is_on(self) -> bool:
+        """Return current Always Power On setting."""
+        return self._pca._device_config.get(self._device_id, {}).get(
+            CONF_ALWAYS_POWER_ON, False
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable Always Power On."""
+        await self._set_config_value(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable Always Power On."""
+        await self._set_config_value(False)
+
+    async def _set_config_value(self, value: bool) -> None:
+        """Store the setting in runtime config and persist to entry options."""
+        self._pca._device_config.setdefault(self._device_id, {})[
+            CONF_ALWAYS_POWER_ON
+        ] = value
+
+        # Persistieren, damit die Einstellung einen Neustart überlebt
+        new_options = dict(self._entry.options)
+        device_config = dict(new_options.get("device_config", {}))
+        device_config[self._device_id] = {
+            **device_config.get(self._device_id, {}),
+            CONF_ALWAYS_POWER_ON: value,
+        }
+        new_options["device_config"] = device_config
+        self.hass.config_entries.async_update_entry(
+            self._entry, options=new_options
+        )
+        self.async_write_ha_state()

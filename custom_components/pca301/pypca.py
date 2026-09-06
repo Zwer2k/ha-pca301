@@ -15,6 +15,8 @@ from pathlib import Path
 import serial
 from homeassistant.helpers import entity_registry as er, device_registry as dr
 
+from .const import CONF_AVAILABILITY_TIMEOUT
+
 SEND_SUFFIX = "s"
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +46,8 @@ class PCA:
         self._serial_lock = threading.Lock()  # Lock für serielle Schnittstelle
         self._last_seen = {}  # deviceId -> timestamp of last received message
         self._availability_timeout = 60  # seconds
+        # Laufzeit-Konfiguration pro Gerät (wird von Config-Entities gesetzt)
+        self._device_config = {}  # deviceId -> {always_power_on, auto_on_delay, availability_timeout}
 
     async def async_load_known_devices(self, hass):
         # No-op: Devices will be loaded from the Home Assistant device registry or entry.options.
@@ -129,7 +133,10 @@ class PCA:
         last = self._last_seen.get(deviceId)
         if last is None:
             return False
-        return (time.time() - last) < self._availability_timeout
+        timeout = self._device_config.get(deviceId, {}).get(
+            CONF_AVAILABILITY_TIMEOUT, self._availability_timeout
+        )
+        return (time.time() - last) < timeout
 
     def get_current_power(self, deviceId):
         return self._devices[deviceId]["power"]
