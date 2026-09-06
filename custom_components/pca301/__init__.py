@@ -18,7 +18,11 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PCA301 from a config entry."""
-    port = entry.data.get(CONF_DEVICE) or "/dev/ttyUSB0"
+    # Port aus options bevorzugen (kann nachträglich geändert werden), dann data, dann default
+    port = entry.options.get(
+        CONF_DEVICE,
+        entry.data.get(CONF_DEVICE, "/dev/ttyUSB0")
+    )
     pca = PCA(hass, port)
     # Load channel mapping from entry.options, if present
     channel_map = entry.options.get("channels")
