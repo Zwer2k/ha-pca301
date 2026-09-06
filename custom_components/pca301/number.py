@@ -7,6 +7,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_AUTO_ON_DELAY,
@@ -114,7 +115,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, pca.close)
 
 
-class PCA301Number(NumberEntity):
+class PCA301Number(NumberEntity, RestoreEntity):
     """Number entity for per-device numeric configuration."""
 
     _attr_has_entity_name = True
