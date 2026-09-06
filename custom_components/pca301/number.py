@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import (
@@ -156,6 +156,19 @@ class PCA301Number(NumberEntity):
         self._attr_device_info = {
             "identifiers": {("pca301", device_id)},
         }
+
+    async def async_added_to_hass(self):
+        """Disable availability_timeout entity by default when first added."""
+        if not self._attr_entity_registry_enabled_default:
+            # Prüfen, ob die Entity bereits in der Registry existiert
+            entity_registry = er.async_get(self.hass)
+            registry_entry = entity_registry.async_get(self.entity_id)
+            if registry_entry is None:
+                # Erstmalig hinzugefügt: explizit deaktivieren
+                entity_registry.async_update_entity(
+                    self.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
+                )
+        await super().async_added_to_hass()
 
     @property
     def native_value(self) -> float:
