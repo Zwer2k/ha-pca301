@@ -160,11 +160,12 @@ class PCA301Number(NumberEntity):
     async def async_added_to_hass(self):
         """Disable availability_timeout entity by default when first added."""
         if not self._attr_entity_registry_enabled_default:
-            # Prüfen, ob die Entity bereits in der Registry existiert
-            entity_registry = er.async_get(self.hass)
-            registry_entry = entity_registry.async_get(self.entity_id)
-            if registry_entry is None:
+            # Nur beim allerersten Hinzufügen deaktivieren, nicht bei Neustart/Reload
+            # Wir prüfen, ob die Entity bereits einen State hat (dann war sie schon mal da)
+            last_state = await self.async_get_last_state()
+            if last_state is None:
                 # Erstmalig hinzugefügt: explizit deaktivieren
+                entity_registry = er.async_get(self.hass)
                 entity_registry.async_update_entity(
                     self.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
                 )
